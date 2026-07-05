@@ -1,0 +1,2 @@
+test,parameter,estimate,ci_2.5%,median,ci_97.5%,probability_positive
+block_bootstrap_annual_excess,6m_blocks_5000x,0.09420810712474975,0.010355923893137305,0.09390121463155021,0.1725480463376832,0.9844
