@@ -1,0 +1,2 @@
+block_months,simulations,annual_excess_estimate,ci_2.5%,median,ci_97.5%,probability_positive
+6,5000,0.10165355876943435,0.013831846216592163,0.10167496020017094,0.18649397079974825,0.9882
