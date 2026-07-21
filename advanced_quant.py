@@ -23,26 +23,52 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from ml_quant import design as ridge_design
 from ml_quant import fit as ridge_fit
 from ml_quant import metric
 from ml_quant import predict as ridge_predict
-from ml_quant import prepare as prepare_base
+from data_cleaning import clean_monthly_panel, cleaning_report
+from ml_quant import design as ridge_design
 
 
 ROOT = Path(__file__).resolve().parent
 OUT = ROOT / "output"
 BASE_FEATURES = [
-    "momentum", "value_pe", "value_pb", "value_ps", "low_volatility",
-    "small_size", "reversal", "liquidity", "roe", "roa", "gross_margin",
-    "cash_quality", "low_leverage",
+    "long_term_reversal_12_1", "earnings_yield", "book_to_market", "sales_to_price",
+    "low_volatility", "large_cap_stability", "short_reversal", "illiquidity_premium",
+    "roe", "roa", "gross_margin", "cash_conversion",
 ]
 DYNAMIC_FEATURES = [
-    "momentum_3m", "momentum_6m", "return_stability_6m", "return_stability_12m",
-    "size_growth_3m", "turnover_proxy", "max_return_quality", "value_composite",
-    "quality_composite", "momentum_acceleration",
+    "medium_reversal_3m", "medium_reversal_6m", "return_stability_6m",
+    "return_stability_12m", "downside_stability_12m", "low_turnover",
+    "lottery_avoidance", "residual_reversal", "profitability_momentum",
+    "value_composite", "quality_composite",
 ]
 FEATURES = BASE_FEATURES + DYNAMIC_FEATURES
+FACTOR_DEFINITIONS = {
+    "long_term_reversal_12_1": ("negative", "negative 12-1 return; direction fixed on 2014-2017 formation data"),
+    "earnings_yield": ("positive", "1 / positive PE"),
+    "book_to_market": ("positive", "1 / positive PB"),
+    "sales_to_price": ("positive", "1 / positive PS"),
+    "low_volatility": ("negative", "negative annualised realised volatility"),
+    "large_cap_stability": ("positive", "positive log free-float market value; small-cap sign failed formation audit"),
+    "short_reversal": ("negative", "negative current-month return"),
+    "illiquidity_premium": ("positive", "positive Amihud-style illiquidity"),
+    "roe": ("positive", "clean ROE TTM"),
+    "roa": ("positive", "clean ROA TTM"),
+    "gross_margin": ("positive", "clean gross margin TTM"),
+    "cash_conversion": ("positive", "clean CFO / total profit ratio"),
+    "medium_reversal_3m": ("negative", "negative three-month compounded return"),
+    "medium_reversal_6m": ("negative", "negative six-month compounded return"),
+    "return_stability_6m": ("negative", "negative six-month return volatility"),
+    "return_stability_12m": ("negative", "negative twelve-month return volatility"),
+    "downside_stability_12m": ("negative", "negative twelve-month downside volatility"),
+    "low_turnover": ("negative", "negative traded amount / free-float market value"),
+    "lottery_avoidance": ("negative", "negative maximum daily return"),
+    "residual_reversal": ("negative", "negative current return scaled by volatility"),
+    "profitability_momentum": ("positive", "year-over-year ROE and ROA improvement"),
+    "value_composite": ("positive", "average clean value rank"),
+    "quality_composite": ("positive", "average clean quality rank"),
+}
 
 
 @dataclass(frozen=True)
@@ -64,6 +90,8 @@ class Config:
     pairwise_weight: float = 0.20
     signal_memory: float = 0.25
     refit_months: int = 3
+    regime_lookback: int = 3
+    defensive_exposure: float = 0.40
     seed: int = 20260717
 
 
@@ -96,25 +124,70 @@ def _cross_sectional_rank(p: pd.DataFrame, name: str, values: pd.Series) -> None
 
 
 def prepare_advanced(panel_path: Path) -> pd.DataFrame:
-    p = prepare_base(panel_path).sort_values(["Stkcd", "month"]).copy()
-    stock_return = p.groupby("Stkcd", sort=False)["ret"]
-    stock_size = p.groupby("Stkcd", sort=False)["size"]
+    p = clean_monthly_panel(panel_path).sort_values(["Stkcd", "month"]).copy()
+    stock_return = p.groupby("Stkcd", sort=False)["ret_clean"]
+    momentum_3m = stock_return.transform(lambda s: _compound_return(s, 3, 2))
+    momentum_6m = stock_return.transform(lambda s: _compound_return(s, 6, 4))
+    momentum_12_1 = stock_return.transform(
+        lambda s: (1 + s.shift(1)).rolling(11, min_periods=8).apply(np.prod, raw=True) - 1
+    )
+    downside = stock_return.transform(
+        lambda s: s.where(s < 0).rolling(12, min_periods=5).std()
+    )
+    roe_change = p.groupby("Stkcd", sort=False)["F050504C_clean"].diff(12)
+    roa_change = p.groupby("Stkcd", sort=False)["F050204C_clean"].diff(12)
 
     raw: dict[str, pd.Series] = {
-        "momentum_3m": stock_return.transform(lambda s: _compound_return(s, 3, 2)),
-        "momentum_6m": stock_return.transform(lambda s: _compound_return(s, 6, 4)),
+        "long_term_reversal_12_1": -momentum_12_1,
+        "earnings_yield": 1 / p["PE1TTM_clean"],
+        "book_to_market": 1 / p["PBV1B_clean"],
+        "sales_to_price": 1 / p["PSTTM_clean"],
+        "low_volatility": -p["volatility_clean"],
+        "large_cap_stability": np.log(p["size_clean"]),
+        "short_reversal": -p["ret_clean"],
+        "illiquidity_premium": p["illiq_clean"],
+        "roe": p["F050504C_clean"],
+        "roa": p["F050204C_clean"],
+        "gross_margin": p["F053301C_clean"],
+        "cash_conversion": p["F052901C_clean"],
+        "medium_reversal_3m": -momentum_3m,
+        "medium_reversal_6m": -momentum_6m,
         "return_stability_6m": -stock_return.transform(lambda s: s.rolling(6, min_periods=4).std()),
         "return_stability_12m": -stock_return.transform(lambda s: s.rolling(12, min_periods=8).std()),
-        "size_growth_3m": -stock_size.pct_change(3, fill_method=None),
-        "turnover_proxy": _num(p["amount"]) / _num(p["size"]).replace(0, np.nan),
-        "max_return_quality": -_num(p["max_ret"]),
-        "value_composite": p[["value_pe", "value_pb", "value_ps"]].mean(axis=1),
-        "quality_composite": p[["roe", "roa", "gross_margin", "cash_quality", "low_leverage"]].mean(axis=1),
+        "downside_stability_12m": -downside,
+        "low_turnover": -(p["amount_clean"] / p["size_clean"]),
+        "lottery_avoidance": -p["max_ret_clean"],
+        "residual_reversal": -p["ret_clean"] / p["volatility_clean"],
+        "profitability_momentum": pd.concat([roe_change, roa_change], axis=1).mean(axis=1),
     }
-    raw["momentum_acceleration"] = raw["momentum_3m"] - raw["momentum_6m"]
     for name, values in raw.items():
         _cross_sectional_rank(p, name, values)
+    p["value_composite"] = p[["earnings_yield", "book_to_market", "sales_to_price"]].mean(axis=1)
+    p["quality_composite"] = p[["roe", "roa", "gross_margin", "cash_conversion"]].mean(axis=1)
 
+    p["forward_return"] = p.groupby("Stkcd", sort=False)["ret_clean"].shift(-1)
+    p["target"] = p.groupby("month")["forward_return"].rank(pct=True) - 0.5
+    amount_cut = p.groupby("month")["amount_clean"].transform(lambda s: s.quantile(0.20))
+    feature_coverage = p[FEATURES].notna().sum(axis=1)
+    history_months = p.groupby("Stkcd", sort=False).cumcount() + 1
+    p["eligible"] = (
+        (p["trdsta"] == 1) & (p["listed_days"] >= 180) & (p["trading_days"] >= 10)
+        & (p["amount_clean"] >= amount_cut)
+        & ~p["flag_market_data_invalid"] & ~p["flag_special_treatment"]
+        & ~p["flag_abnormal_listing"] & (feature_coverage >= 10) & (history_months >= 8)
+    )
+
+    # Compatibility aliases used only by the legacy polynomial ridge design.
+    aliases = {
+        "momentum": "long_term_reversal_12_1", "value_pe": "earnings_yield",
+        "value_pb": "book_to_market", "value_ps": "sales_to_price",
+        "reversal": "short_reversal", "liquidity": "illiquidity_premium",
+        "cash_quality": "cash_conversion",
+    }
+    for legacy, corrected in aliases.items():
+        p[legacy] = p[corrected]
+    p["small_size"] = p["large_cap_stability"]
+    p["low_leverage"] = 0.0
     for name in FEATURES:
         p[f"{name}_missing"] = p[name].isna().astype(np.float32)
         p[name] = p[name].fillna(0).astype(np.float32)
@@ -133,6 +206,30 @@ def monthly_rank_ic(prediction: np.ndarray, target: np.ndarray, months: np.ndarr
         include_groups=False,
     )
     return float(ic.mean())
+
+
+def factor_direction_audit(panel: pd.DataFrame) -> pd.DataFrame:
+    rows = []
+    periods = {
+        "formation_2014_2017": panel["month"] < "2018-01-01",
+        "out_of_sample_2018_2025": panel["month"] >= "2018-01-01",
+    }
+    for factor in FEATURES:
+        definition = FACTOR_DEFINITIONS[factor]
+        row = {"factor": factor, "raw_direction": definition[0], "definition": definition[1]}
+        values = panel[factor].mask(panel[f"{factor}_missing"].eq(1))
+        for label, period in periods.items():
+            sample = panel[period & panel["eligible"] & panel["target"].notna()].copy()
+            sample["factor_value"] = values.loc[sample.index]
+            ic = sample.groupby("month", observed=True).apply(
+                lambda group: group["factor_value"].corr(group["target"], method="spearman"),
+                include_groups=False,
+            )
+            row[f"mean_ic_{label}"] = ic.mean()
+            row[f"positive_month_share_{label}"] = (ic > 0).mean()
+            row[f"months_{label}"] = ic.count()
+        rows.append(row)
+    return pd.DataFrame(rows)
 
 
 class Standardizer:
@@ -314,10 +411,31 @@ def _select_blend(predictions: list[np.ndarray], target: np.ndarray, months: np.
     return weight, score
 
 
+def capped_inverse_volatility_weights(chosen: pd.DataFrame, cap_multiple: float = 2.0) -> pd.Series:
+    """Risk-balance holdings while preventing a few low-volatility names from dominating."""
+    volatility = chosen["volatility_clean"].clip(lower=0.15, upper=1.50)
+    score = (1 / volatility).clip(
+        lower=(1 / volatility).quantile(0.10), upper=(1 / volatility).quantile(0.90)
+    )
+    weight = score / score.sum()
+    cap = cap_multiple / len(weight)
+    for _ in range(10):
+        above = weight > cap
+        if not above.any():
+            break
+        weight.loc[above] = cap
+        remaining = ~above
+        budget = 1 - weight.loc[above].sum()
+        if remaining.any():
+            weight.loc[remaining] = score.loc[remaining] / score.loc[remaining].sum() * budget
+    return weight / weight.sum()
+
+
 def walk_forward(p: pd.DataFrame, config: Config) -> tuple[pd.DataFrame, pd.DataFrame]:
     rows: list[dict] = []
     logs: list[dict] = []
     previous_names: set = set()
+    previous_weights: dict[str, float] = {}
     previous_signal: dict = {}
     fitted = None
     refit_counter = 0
@@ -411,19 +529,57 @@ def walk_forward(p: pd.DataFrame, config: Config) -> tuple[pd.DataFrame, pd.Data
         additions = test[~test["Stkcd"].isin(retained)].nlargest(max(0, count - len(retained)), "prediction")
         chosen = pd.concat([test[test["Stkcd"].isin(retained)], additions]).drop_duplicates("Stkcd").head(count)
         names = set(chosen["Stkcd"])
-        turnover = 1.0 if not previous_names else 1 - len(names & previous_names) / max(len(names), 1)
+        portfolio_weights = pd.Series(1 / len(chosen), index=chosen.index)
+        inverse_volatility_weights = capped_inverse_volatility_weights(chosen)
+        current_weights = dict(zip(chosen["Stkcd"], portfolio_weights))
+        if not previous_weights:
+            turnover = 1.0
+        else:
+            union = set(previous_weights) | set(current_weights)
+            turnover = 0.5 * sum(abs(current_weights.get(name, 0) - previous_weights.get(name, 0)) for name in union)
+        weighted_return = float(np.dot(portfolio_weights, chosen["forward_return"]))
+        inverse_volatility_return = float(np.dot(inverse_volatility_weights, chosen["forward_return"]))
         rows.append({
-            "month": month + pd.offsets.MonthEnd(1), "gross_return": chosen["forward_return"].mean(),
+            "month": month + pd.offsets.MonthEnd(1), "gross_return": weighted_return,
+            "inverse_volatility_return": inverse_volatility_return,
             "turnover": turnover, "holdings": len(names), "mean_prediction": chosen["prediction"].mean(),
             "ridge_weight": weights[0], "tabm_weight": weights[1], "retrieval_weight": weights[2],
         })
         previous_names = names
+        previous_weights = current_weights
         refit_counter += 1
 
     result = pd.DataFrame(rows).dropna(subset=["gross_return"])
     result["net_return"] = result["gross_return"] - result["turnover"] * config.cost_bps / 10_000
     result["advanced_nav"] = (1 + result["net_return"]).cumprod()
     return result, pd.DataFrame(logs)
+
+
+def apply_regime_overlay(result: pd.DataFrame, config: Config) -> pd.DataFrame:
+    """Use only prior benchmark returns to reduce exposure in a negative market trend."""
+    result = result.copy()
+    trend = (1 + result["benchmark_return"]).rolling(
+        config.regime_lookback, min_periods=config.regime_lookback
+    ).apply(np.prod, raw=True).shift(1) - 1
+    result["market_trend_3m"] = trend
+    result["exposure"] = np.where(trend.lt(0), config.defensive_exposure, 1.0)
+    result.loc[trend.isna(), "exposure"] = 1.0
+    result["risk_managed_return"] = result["exposure"] * result["net_return"]
+    result["risk_managed_nav"] = (1 + result["risk_managed_return"]).cumprod()
+    return result
+
+
+def risk_overlay_validation(result: pd.DataFrame) -> pd.DataFrame:
+    rows = []
+    periods = {
+        "formation_2018_2021": result["month"] < "2022-01-01",
+        "validation_2022_2025": result["month"] >= "2022-01-01",
+        "full_2018_2025": pd.Series(True, index=result.index),
+    }
+    for period, mask in periods.items():
+        for series in ["net_return", "risk_managed_return"]:
+            rows.append({"period": period, "series": series, **metric(result.loc[mask, series])})
+    return pd.DataFrame(rows)
 
 
 def main() -> None:
@@ -448,6 +604,8 @@ def main() -> None:
     seed_everything(config.seed)
     OUT.mkdir(exist_ok=True)
     panel = prepare_advanced(args.panel)
+    cleaning_report(panel).to_csv(OUT / "data_quality_report.csv", index=False)
+    factor_direction_audit(panel).to_csv(OUT / "factor_direction_audit.csv", index=False)
     result, log = walk_forward(panel, config)
 
     baseline = pd.read_csv(OUT / "deep_learning_backtest.csv", parse_dates=["month"])
@@ -455,12 +613,16 @@ def main() -> None:
         baseline[["month", "net_return", "benchmark_return"]].rename(columns={"net_return": "previous_dl_return"}),
         on="month", how="left",
     )
+    result = apply_regime_overlay(result, config)
     result["previous_dl_nav"] = (1 + result["previous_dl_return"]).cumprod()
     result["benchmark_nav"] = (1 + result["benchmark_return"]).cumprod()
     result.to_csv(OUT / "advanced_backtest.csv", index=False)
     log.to_csv(OUT / "advanced_model_log.csv", index=False)
+    risk_overlay_validation(result).to_csv(OUT / "risk_overlay_validation.csv", index=False)
     metrics = pd.DataFrame([
-        {"series": "tabm_rank_retrieval_ensemble", **metric(result["net_return"]),
+        {"series": "cleaned_tabm_equal_weight", **metric(result["net_return"]),
+         "avg_turnover": result["turnover"].mean()},
+        {"series": "cleaned_tabm_regime_managed", **metric(result["risk_managed_return"]),
          "avg_turnover": result["turnover"].mean()},
         {"series": "previous_mlp_ridge", **metric(result["previous_dl_return"]),
          "avg_turnover": baseline["turnover"].mean()},

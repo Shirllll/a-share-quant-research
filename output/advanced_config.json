@@ -16,5 +16,7 @@
   "pairwise_weight": 0.2,
   "signal_memory": 0.25,
   "refit_months": 3,
+  "regime_lookback": 3,
+  "defensive_exposure": 0.4,
   "seed": 20260717
 }
