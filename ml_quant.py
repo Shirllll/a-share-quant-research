@@ -16,17 +16,28 @@ def num(s):
     return pd.to_numeric(s, errors="coerce").replace([np.inf, -np.inf], np.nan)
 
 
+def bounded(s, lower, upper):
+    x = num(s)
+    return x.where(x.between(lower, upper))
+
+
+def positive_inverse(s, upper):
+    x = bounded(s, 0.01, upper)
+    return 1 / x
+
+
 def prepare(path):
     p = pd.read_csv(path, parse_dates=["month", "Listdt"], low_memory=False).sort_values(["Stkcd", "month"])
     p["forward_return"] = p.groupby("Stkcd")["ret"].shift(-1)
-    raw = {"momentum": num(p["mom_12_1"]), "value_pe": 1/num(p["PE1TTM"]),
-           "value_pb": 1/num(p["PBV1B"]), "value_ps": 1/num(p["PSTTM"]),
-           "low_volatility": -num(p["volatility"]),
+    raw = {"momentum": num(p["mom_12_1"]), "value_pe": positive_inverse(p["PE1TTM"], 500),
+           "value_pb": positive_inverse(p["PBV1B"], 50), "value_ps": positive_inverse(p["PSTTM"], 100),
+           "low_volatility": -bounded(p["volatility"], .03, 3),
            "small_size": -np.log(num(p["size"]).where(num(p["size"]) > 0)),
-           "reversal": -num(p["ret"]), "liquidity": -num(p["illiq"]),
-           "roe": num(p["F050504C"]), "roa": num(p["F050204C"]),
-           "gross_margin": num(p["F053301C"]), "cash_quality": num(p["F052901C"]),
-           "low_leverage": -num(p["F011201A"])}
+           "reversal": -num(p["ret"]), "liquidity": num(p["illiq"]),
+           "roe": bounded(p["F050504C"], -1, 1), "roa": bounded(p["F050204C"], -.5, .5),
+           "gross_margin": bounded(p["F053301C"], -1, 1.5),
+           "cash_quality": bounded(p["F052901C"], 0, 5),
+           "low_leverage": -bounded(p["F011201A"], 0, 1.5)}
     for name, values in raw.items():
         p[name] = values
         r = p.groupby(["month", "industry"], dropna=False)[name].rank(pct=True)

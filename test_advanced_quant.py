@@ -4,7 +4,12 @@ import numpy as np
 import pandas as pd
 import unittest
 
-from advanced_quant import Standardizer, TemporalRetriever, monthly_rank_ic
+from advanced_quant import (
+    Standardizer,
+    TemporalRetriever,
+    capped_inverse_volatility_weights,
+    monthly_rank_ic,
+)
 
 
 class AdvancedModelTests(unittest.TestCase):
@@ -29,6 +34,13 @@ class AdvancedModelTests(unittest.TestCase):
         prediction = model.predict(x[:5])
         self.assertEqual(prediction.shape, (5,))
         self.assertTrue(np.isfinite(prediction).all())
+
+    def test_inverse_volatility_weights_are_capped_and_sum_to_one(self):
+        frame = pd.DataFrame({"volatility_clean": [0.10, 0.20, 0.40, 0.80]})
+        weights = capped_inverse_volatility_weights(frame)
+        self.assertAlmostEqual(float(weights.sum()), 1.0, places=12)
+        self.assertTrue((weights >= 0).all())
+        self.assertLessEqual(float(weights.max()), 0.5 + 1e-12)
 
 
 if __name__ == "__main__":

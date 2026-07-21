@@ -9,6 +9,8 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from data_cleaning import attach_security_states
+
 
 ROOT = Path(__file__).resolve().parent
 DATA = ROOT / "data"
@@ -132,6 +134,11 @@ def rank_z(s: pd.Series, higher_better: bool = True) -> pd.Series:
     return z if higher_better else -z
 
 
+def positive_inverse(s: pd.Series, upper: float) -> pd.Series:
+    x = pd.to_numeric(s, errors="coerce")
+    return 1 / x.where(x.between(0.01, upper))
+
+
 def build_panel(start: str, end: str, use_quality: bool) -> pd.DataFrame:
     p = monthly_prices(start, end).merge(monthly_valuation(start, end), on=["Stkcd", "month"], how="left")
     p = p.merge(company_info()[["Stkcd", "Listdt"]], on="Stkcd", how="left")
@@ -149,7 +156,7 @@ def build_panel(start: str, end: str, use_quality: bool) -> pd.DataFrame:
                         by="Stkcd", direction="backward")[["Stkcd", "month", "industry"]]
     p = p.merge(ind, on=["Stkcd", "month"], how="left")
     p["listed_days"] = (p["month"] - p["Listdt"]).dt.days
-    return p
+    return attach_security_states(p)
 
 
 def neutralize(g: pd.DataFrame, col: str) -> pd.Series:
@@ -167,17 +174,22 @@ def run_backtest(p: pd.DataFrame, cost_bps: float, top_frac: float, buffer_frac:
     for month, g in p.groupby("month", sort=True):
         g = g.copy()
         liquid_cut = g["amount"].quantile(.20)
-        g = g[(g["trdsta"] == 1) & (g["listed_days"] >= 180) & (g["amount"] >= liquid_cut) & (g["trading_days"] >= 10)]
-        g["value"] = pd.concat([rank_z(1 / pd.to_numeric(g[c], errors="coerce")) for c in ["PE1TTM", "PBV1B", "PSTTM"]], axis=1).mean(axis=1)
+        g = g[(g["trdsta"] == 1) & (g["listed_days"] >= 180) & (g["amount"] >= liquid_cut)
+              & (g["trading_days"] >= 15) & (g["special_state"] == "A") & (g["listing_state"] == "A")]
+        value_parts = [positive_inverse(g["PE1TTM"], 500), positive_inverse(g["PBV1B"], 50),
+                       positive_inverse(g["PSTTM"], 100)]
+        g["value"] = pd.concat([rank_z(x) for x in value_parts], axis=1).mean(axis=1)
         g["momentum"] = rank_z(g["mom_12_1"])
         g["low_volatility"] = rank_z(g["volatility"], higher_better=False)
         g["small_size"] = rank_z(np.log(g["size"].where(g["size"] > 0)), higher_better=False)
         g["reversal"] = rank_z(g["ret"], higher_better=False)
-        g["liquidity_quality"] = rank_z(g["illiq"], higher_better=False)
-        factors = ["value", "momentum", "low_volatility", "small_size", "reversal", "liquidity_quality"]
+        g["illiquidity_premium"] = rank_z(g["illiq"])
+        factors = ["value", "momentum", "low_volatility", "small_size", "reversal", "illiquidity_premium"]
         if use_quality:
-            quality_parts = [rank_z(g[c]) for c in quality_cols]
-            quality_parts.append(rank_z(g["F011201A"], higher_better=False))
+            cleaned_quality = [pd.to_numeric(g[c], errors="coerce").where(pd.to_numeric(g[c], errors="coerce").between(-1, 1.5)) for c in quality_cols]
+            quality_parts = [rank_z(x) for x in cleaned_quality]
+            leverage = pd.to_numeric(g["F011201A"], errors="coerce").where(pd.to_numeric(g["F011201A"], errors="coerce").between(0, 1.5))
+            quality_parts.append(rank_z(leverage, higher_better=False))
             g["quality"] = pd.concat(quality_parts, axis=1).mean(axis=1)
             factors.append("quality")
         for f in factors:
@@ -239,7 +251,7 @@ def factor_ic(p: pd.DataFrame, use_quality: bool) -> pd.DataFrame:
     p["forward_return"] = p.groupby("Stkcd")["ret"].shift(-1)
     raw = {"momentum": p["mom_12_1"], "value_pb": 1 / pd.to_numeric(p["PBV1B"], errors="coerce"),
            "low_volatility": -p["volatility"], "small_size": -np.log(p["size"].where(p["size"] > 0)),
-           "reversal": -p["ret"], "liquidity_quality": -p["illiq"]}
+           "reversal": -p["ret"], "illiquidity_premium": p["illiq"]}
     if use_quality:
         raw.update({"roe": p["F050504C"], "roa": p["F050204C"], "low_leverage": -p["F011201A"]})
     rows = []
