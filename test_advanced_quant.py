@@ -7,7 +7,9 @@ import unittest
 from advanced_quant import (
     Standardizer,
     TemporalRetriever,
-    capped_inverse_volatility_weights,
+    _select_blend,
+    industry_balanced_diagnostic,
+    leg_turnover,
     monthly_rank_ic,
 )
 
@@ -35,12 +37,33 @@ class AdvancedModelTests(unittest.TestCase):
         self.assertEqual(prediction.shape, (5,))
         self.assertTrue(np.isfinite(prediction).all())
 
-    def test_inverse_volatility_weights_are_capped_and_sum_to_one(self):
-        frame = pd.DataFrame({"volatility_clean": [0.10, 0.20, 0.40, 0.80]})
-        weights = capped_inverse_volatility_weights(frame)
-        self.assertAlmostEqual(float(weights.sum()), 1.0, places=12)
-        self.assertTrue((weights >= 0).all())
-        self.assertLessEqual(float(weights.max()), 0.5 + 1e-12)
+    def test_nonlinear_gate_falls_back_to_linear_without_material_gain(self):
+        target = np.array([0.0, 1.0, 0.0, 1.0])
+        months = np.array(["2020-01", "2020-01", "2020-02", "2020-02"])
+        linear = target.copy()
+        neural = target.copy()
+        retrieval = target.copy()
+        weights, _, _, enabled = _select_blend([linear, neural, retrieval], target, months, 0.005)
+        self.assertFalse(enabled)
+        self.assertTrue(np.array_equal(weights, np.array([1.0, 0.0, 0.0])))
+
+    def test_industry_diagnostic_is_exactly_balanced(self):
+        frame = pd.DataFrame({
+            "industry": ["A"] * 10 + ["B"] * 20,
+            "prediction": np.arange(30),
+        })
+        long_weights, short_weights = industry_balanced_diagnostic(frame)
+        self.assertAlmostEqual(long_weights.sum(), 1.0)
+        self.assertAlmostEqual(short_weights.sum(), 1.0)
+        self.assertAlmostEqual(long_weights[frame.loc[long_weights.index, "industry"].eq("A")].sum(), 0.5)
+        self.assertAlmostEqual(short_weights[frame.loc[short_weights.index, "industry"].eq("B")].sum(), 0.5)
+
+    def test_leg_turnover_uses_weights(self):
+        self.assertAlmostEqual(leg_turnover({"A": 0.5, "B": 0.5}, {}), 1.0)
+        self.assertAlmostEqual(
+            leg_turnover({"A": 0.5, "C": 0.5}, {"A": 0.5, "B": 0.5}),
+            0.5,
+        )
 
 
 if __name__ == "__main__":

@@ -1,16 +1,11 @@
 from __future__ import annotations
 
-"""Walk-forward A-share ranking with recent tabular-learning ideas.
+"""Walk-forward A-share cross-sectional alpha research.
 
-The implementation deliberately keeps all model selection inside the historical
-window.  It combines:
-
-* a TabM-style parameter-efficient neural ensemble;
-* a lightweight TabR-style temporal neighbour retriever;
-* the existing polynomial ridge model as a low-variance anchor.
-
-This is an independent research implementation, not a verbatim reproduction of
-the TabM or TabR reference packages.
+The primary model is an auditable linear ridge baseline. A TabM-style neural
+ensemble and a temporal neighbour retriever are admitted only when they improve
+historical validation IC by a pre-declared margin. The long-short portfolio is
+an industry-balanced research diagnostic, not an executable A-share short book.
 """
 
 import argparse
@@ -27,7 +22,6 @@ from ml_quant import fit as ridge_fit
 from ml_quant import metric
 from ml_quant import predict as ridge_predict
 from data_cleaning import clean_monthly_panel, cleaning_report
-from ml_quant import design as ridge_design
 
 
 ROOT = Path(__file__).resolve().parent
@@ -45,29 +39,29 @@ DYNAMIC_FEATURES = [
 ]
 FEATURES = BASE_FEATURES + DYNAMIC_FEATURES
 FACTOR_DEFINITIONS = {
-    "long_term_reversal_12_1": ("negative", "negative 12-1 return; direction fixed on 2014-2017 formation data"),
-    "earnings_yield": ("positive", "1 / positive PE"),
-    "book_to_market": ("positive", "1 / positive PB"),
-    "sales_to_price": ("positive", "1 / positive PS"),
-    "low_volatility": ("negative", "negative annualised realised volatility"),
-    "large_cap_stability": ("positive", "positive log free-float market value; small-cap sign failed formation audit"),
-    "short_reversal": ("negative", "negative current-month return"),
-    "illiquidity_premium": ("positive", "positive Amihud-style illiquidity"),
-    "roe": ("positive", "clean ROE TTM"),
-    "roa": ("positive", "clean ROA TTM"),
-    "gross_margin": ("positive", "clean gross margin TTM"),
-    "cash_conversion": ("positive", "clean CFO / total profit ratio"),
-    "medium_reversal_3m": ("negative", "negative three-month compounded return"),
-    "medium_reversal_6m": ("negative", "negative six-month compounded return"),
-    "return_stability_6m": ("negative", "negative six-month return volatility"),
-    "return_stability_12m": ("negative", "negative twelve-month return volatility"),
-    "downside_stability_12m": ("negative", "negative twelve-month downside volatility"),
-    "low_turnover": ("negative", "negative traded amount / free-float market value"),
-    "lottery_avoidance": ("negative", "negative maximum daily return"),
-    "residual_reversal": ("negative", "negative current return scaled by volatility"),
-    "profitability_momentum": ("positive", "year-over-year ROE and ROA improvement"),
-    "value_composite": ("positive", "average clean value rank"),
-    "quality_composite": ("positive", "average clean quality rank"),
+    "long_term_reversal_12_1": ("lower_raw_better", "negative 12-1 return; direction fixed on 2014-2017 formation data"),
+    "earnings_yield": ("higher_raw_better", "1 / positive PE"),
+    "book_to_market": ("higher_raw_better", "1 / positive PB"),
+    "sales_to_price": ("higher_raw_better", "1 / positive PS"),
+    "low_volatility": ("lower_raw_better", "negative annualised realised volatility"),
+    "large_cap_stability": ("higher_raw_better", "positive log free-float market value; small-cap sign failed formation audit"),
+    "short_reversal": ("lower_raw_better", "negative current-month return"),
+    "illiquidity_premium": ("higher_raw_better", "positive Amihud-style illiquidity"),
+    "roe": ("higher_raw_better", "clean ROE TTM"),
+    "roa": ("higher_raw_better", "clean ROA TTM"),
+    "gross_margin": ("higher_raw_better", "clean gross margin TTM"),
+    "cash_conversion": ("higher_raw_better", "clean CFO / total profit ratio"),
+    "medium_reversal_3m": ("lower_raw_better", "negative three-month compounded return"),
+    "medium_reversal_6m": ("lower_raw_better", "negative six-month compounded return"),
+    "return_stability_6m": ("lower_raw_better", "negative six-month return volatility"),
+    "return_stability_12m": ("lower_raw_better", "negative twelve-month return volatility"),
+    "downside_stability_12m": ("lower_raw_better", "negative twelve-month downside volatility"),
+    "low_turnover": ("lower_raw_better", "negative traded amount / free-float market value"),
+    "lottery_avoidance": ("lower_raw_better", "negative maximum daily return"),
+    "residual_reversal": ("lower_raw_better", "negative current return scaled by volatility"),
+    "profitability_momentum": ("higher_raw_better", "year-over-year ROE and ROA improvement"),
+    "value_composite": ("higher_score_better", "average clean value rank"),
+    "quality_composite": ("higher_score_better", "average clean quality rank"),
 }
 
 
@@ -90,8 +84,7 @@ class Config:
     pairwise_weight: float = 0.20
     signal_memory: float = 0.25
     refit_months: int = 3
-    regime_lookback: int = 3
-    defensive_exposure: float = 0.40
+    min_nonlinear_ic_gain: float = 0.005
     seed: int = 20260717
 
 
@@ -166,7 +159,9 @@ def prepare_advanced(panel_path: Path) -> pd.DataFrame:
     p["quality_composite"] = p[["roe", "roa", "gross_margin", "cash_conversion"]].mean(axis=1)
 
     p["forward_return"] = p.groupby("Stkcd", sort=False)["ret_clean"].shift(-1)
-    p["target"] = p.groupby("month")["forward_return"].rank(pct=True) - 0.5
+    market_target = p.groupby("month")["forward_return"].rank(pct=True) - 0.5
+    industry_target = p.groupby(["month", "industry"], dropna=False)["forward_return"].rank(pct=True) - 0.5
+    p["target"] = industry_target.fillna(market_target)
     amount_cut = p.groupby("month")["amount_clean"].transform(lambda s: s.quantile(0.20))
     feature_coverage = p[FEATURES].notna().sum(axis=1)
     history_months = p.groupby("Stkcd", sort=False).cumcount() + 1
@@ -199,6 +194,18 @@ def feature_matrix(df: pd.DataFrame) -> np.ndarray:
     return df[cols].to_numpy(np.float32, copy=True)
 
 
+def linear_feature_names() -> list[str]:
+    return FEATURES + [f"{name}_missing" for name in FEATURES]
+
+
+def linear_design(df: pd.DataFrame, medians: np.ndarray | None = None) -> tuple[np.ndarray, np.ndarray]:
+    """Auditable linear baseline: cleaned factors and missing flags, without interactions."""
+    x = feature_matrix(df).astype(float)
+    if medians is None:
+        medians = np.nan_to_num(np.nanmedian(x, axis=0), nan=0.0)
+    return np.where(np.isnan(x), medians, x), medians
+
+
 def monthly_rank_ic(prediction: np.ndarray, target: np.ndarray, months: np.ndarray) -> float:
     frame = pd.DataFrame({"prediction": prediction, "target": target, "month": months})
     ic = frame.groupby("month", observed=True).apply(
@@ -216,7 +223,7 @@ def factor_direction_audit(panel: pd.DataFrame) -> pd.DataFrame:
     }
     for factor in FEATURES:
         definition = FACTOR_DEFINITIONS[factor]
-        row = {"factor": factor, "raw_direction": definition[0], "definition": definition[1]}
+        row = {"factor": factor, "economic_preference": definition[0], "implemented_transform": definition[1]}
         values = panel[factor].mask(panel[f"{factor}_missing"].eq(1))
         for label, period in periods.items():
             sample = panel[period & panel["eligible"] & panel["target"].notna()].copy()
@@ -397,7 +404,8 @@ def _sample(frame: pd.DataFrame, maximum: int, seed: int) -> pd.DataFrame:
     return frame.sample(maximum, random_state=seed).sort_values("month")
 
 
-def _select_blend(predictions: list[np.ndarray], target: np.ndarray, months: np.ndarray) -> tuple[np.ndarray, float]:
+def _select_blend(predictions: list[np.ndarray], target: np.ndarray, months: np.ndarray,
+                  minimum_gain: float) -> tuple[np.ndarray, float, float, bool]:
     # Small simplex grid: enough flexibility without turning validation into a large search.
     candidates = []
     for neural_weight in [0.0, 0.25, 0.50, 0.75, 1.0]:
@@ -408,42 +416,59 @@ def _select_blend(predictions: list[np.ndarray], target: np.ndarray, months: np.
             blend = ridge_weight * predictions[0] + neural_weight * predictions[1] + retrieval_weight * predictions[2]
             candidates.append((monthly_rank_ic(blend, target, months), np.array([ridge_weight, neural_weight, retrieval_weight])))
     score, weight = max(candidates, key=lambda item: item[0])
-    return weight, score
+    ridge_score = monthly_rank_ic(predictions[0], target, months)
+    enabled = bool(score >= ridge_score + minimum_gain and weight[0] < 1.0)
+    if not enabled:
+        return np.array([1.0, 0.0, 0.0]), ridge_score, ridge_score, False
+    return weight, score, ridge_score, True
 
 
-def capped_inverse_volatility_weights(chosen: pd.DataFrame, cap_multiple: float = 2.0) -> pd.Series:
-    """Risk-balance holdings while preventing a few low-volatility names from dominating."""
-    volatility = chosen["volatility_clean"].clip(lower=0.15, upper=1.50)
-    score = (1 / volatility).clip(
-        lower=(1 / volatility).quantile(0.10), upper=(1 / volatility).quantile(0.90)
-    )
-    weight = score / score.sum()
-    cap = cap_multiple / len(weight)
-    for _ in range(10):
-        above = weight > cap
-        if not above.any():
-            break
-        weight.loc[above] = cap
-        remaining = ~above
-        budget = 1 - weight.loc[above].sum()
-        if remaining.any():
-            weight.loc[remaining] = score.loc[remaining] / score.loc[remaining].sum() * budget
-    return weight / weight.sum()
+def industry_balanced_diagnostic(test: pd.DataFrame, tail_fraction: float = 0.10) -> tuple[pd.Series, pd.Series]:
+    """Return exact industry-balanced long and short weights.
+
+    Industries with fewer than ten eligible names are excluded. Every included
+    industry receives equal capital on each leg, with equal weights inside the
+    industry's upper or lower prediction tail.
+    """
+    groups: list[tuple[pd.Index, pd.Index]] = []
+    for _, group in test.groupby("industry", dropna=False):
+        if len(group) < 10:
+            continue
+        tail_count = max(1, int(np.floor(len(group) * tail_fraction)))
+        ordered = group.sort_values("prediction")
+        groups.append((ordered.tail(tail_count).index, ordered.head(tail_count).index))
+    if not groups:
+        return pd.Series(dtype=float), pd.Series(dtype=float)
+    industry_weight = 1.0 / len(groups)
+    long_weights: dict[int, float] = {}
+    short_weights: dict[int, float] = {}
+    for long_index, short_index in groups:
+        for index in long_index:
+            long_weights[index] = industry_weight / len(long_index)
+        for index in short_index:
+            short_weights[index] = industry_weight / len(short_index)
+    return pd.Series(long_weights, dtype=float), pd.Series(short_weights, dtype=float)
 
 
-def walk_forward(p: pd.DataFrame, config: Config) -> tuple[pd.DataFrame, pd.DataFrame]:
-    rows: list[dict] = []
-    logs: list[dict] = []
-    previous_names: set = set()
-    previous_weights: dict[str, float] = {}
-    previous_signal: dict = {}
-    fitted = None
-    refit_counter = 0
+def leg_turnover(current: dict[str, float], previous: dict[str, float]) -> float:
+    """One-way turnover for a fully invested leg."""
+    if not previous:
+        return 1.0
+    names = set(current) | set(previous)
+    return 0.5 * sum(abs(current.get(name, 0.0) - previous.get(name, 0.0)) for name in names)
+
+
+def walk_forward(p: pd.DataFrame, config: Config):
+    rows, logs, coefficient_rows, decile_rows, trade_rows = [], [], [], [], []
+    previous_names, previous_weights, previous_signal = set(), {}, {}
+    previous_amount: dict[str, float] = {}
+    previous_diag_long: dict[str, float] = {}
+    previous_diag_short: dict[str, float] = {}
+    fitted, refit_counter = None, 0
 
     months = sorted(pd.Timestamp(m) for m in p.loc[p["month"] >= config.start, "month"].unique())
     for month in months:
-        should_refit = fitted is None or refit_counter >= config.refit_months
-        if should_refit:
+        if fitted is None or refit_counter >= config.refit_months:
             lower = month - pd.DateOffset(months=config.train_months)
             history = p[(p["month"] < month) & (p["month"] >= lower) & p["eligible"] & p["target"].notna()].copy()
             if len(history) < 10_000:
@@ -461,26 +486,28 @@ def walk_forward(p: pd.DataFrame, config: Config) -> tuple[pd.DataFrame, pd.Data
             validation_months = validation_frame["month"].to_numpy()
 
             neural_trial = TabMModel(config, x_train.shape[1], config.seed + month.year * 100 + month.month)
-            best_epoch, neural_ic = neural_trial.fit(
-                x_train, y_train, (x_validation, y_validation, validation_months)
-            )
+            best_epoch, neural_ic = neural_trial.fit(x_train, y_train, (x_validation, y_validation, validation_months))
 
-            ridge_train = _sample(
-                train_frame, config.max_ridge_samples, config.seed + 31 + month.year * 100 + month.month
-            )
-            ridge_x, medians = ridge_design(ridge_train)
+            ridge_train = _sample(train_frame, config.max_ridge_samples, config.seed + 31 + month.year * 100 + month.month)
+            ridge_x, medians = linear_design(ridge_train)
             ridge_y = ridge_train["target"].to_numpy(np.float32)
-            ridge = ridge_fit(ridge_x, ridge_y, alpha=1000.0)
-            ridge_validation_x, _ = ridge_design(validation_frame, medians)
-            ridge_validation = ridge_predict(ridge_validation_x, ridge)
+            ridge_validation_x, _ = linear_design(validation_frame, medians)
+            ridge_candidates = []
+            for alpha in [10.0, 100.0, 1000.0, 10000.0]:
+                candidate = ridge_fit(ridge_x, ridge_y, alpha=alpha)
+                prediction = ridge_predict(ridge_validation_x, candidate)
+                score = monthly_rank_ic(prediction, y_validation, validation_months)
+                ridge_candidates.append((score, alpha, candidate, prediction))
+            ridge_ic, ridge_alpha, ridge, ridge_validation = max(ridge_candidates, key=lambda item: item[0])
 
-            retriever = TemporalRetriever(
-                config.max_retrieval_samples, seed=config.seed + month.year * 100 + month.month
-            ).fit(x_train, y_train, sampled_train["month"].to_numpy())
-            retrieval_validation = retriever.predict(x_validation)
+            retriever = TemporalRetriever(config.max_retrieval_samples, seed=config.seed + month.year * 100 + month.month).fit(
+                x_train, y_train, sampled_train["month"].to_numpy()
+            )
             neural_validation = neural_trial.predict(x_validation)
-            weights, validation_ic = _select_blend(
-                [ridge_validation, neural_validation, retrieval_validation], y_validation, validation_months
+            retrieval_validation = retriever.predict(x_validation)
+            weights, validation_ic, ridge_ic, nonlinear_enabled = _select_blend(
+                [ridge_validation, neural_validation, retrieval_validation], y_validation,
+                validation_months, config.min_nonlinear_ic_gain,
             )
 
             full_frame = _sample(history, config.max_train_samples, config.seed + 17 + month.year * 100 + month.month)
@@ -489,39 +516,57 @@ def walk_forward(p: pd.DataFrame, config: Config) -> tuple[pd.DataFrame, pd.Data
             y_full = full_frame["target"].to_numpy(np.float32)
             neural = TabMModel(config, x_full.shape[1], config.seed + month.year * 100 + month.month)
             neural.fit(x_full, y_full, validation=None, epochs=best_epoch)
-            ridge_full = _sample(
-                history, config.max_ridge_samples, config.seed + 47 + month.year * 100 + month.month
+            ridge_full = _sample(history, config.max_ridge_samples, config.seed + 47 + month.year * 100 + month.month)
+            ridge_x, medians = linear_design(ridge_full)
+            ridge = ridge_fit(ridge_x, ridge_full["target"].to_numpy(np.float32), alpha=ridge_alpha)
+            retriever = TemporalRetriever(config.max_retrieval_samples, seed=config.seed + 17 + month.year * 100 + month.month).fit(
+                x_full, y_full, full_frame["month"].to_numpy()
             )
-            ridge_x, medians = ridge_design(ridge_full)
-            ridge = ridge_fit(ridge_x, ridge_full["target"].to_numpy(np.float32), alpha=1000.0)
-            retriever = TemporalRetriever(
-                config.max_retrieval_samples, seed=config.seed + 17 + month.year * 100 + month.month
-            ).fit(x_full, y_full, full_frame["month"].to_numpy())
-            fitted = (standardizer, neural, ridge, medians, retriever, weights)
+            fitted = (standardizer, neural, ridge, medians, retriever, weights, nonlinear_enabled)
             logs.append({
-                "refit_month": month, "history_samples": len(history), "train_samples": len(full_frame),
-                "ridge_samples": len(ridge_full),
-                "best_epoch": best_epoch, "tabm_validation_ic": neural_ic,
-                "ensemble_validation_ic": validation_ic, "ridge_weight": weights[0],
-                "tabm_weight": weights[1], "retrieval_weight": weights[2],
+                "refit_month": month, "history_samples": len(history), "ridge_samples": len(ridge_full),
+                "ridge_alpha": ridge_alpha, "best_epoch": best_epoch, "ridge_validation_ic": ridge_ic,
+                "tabm_validation_ic": neural_ic, "selected_validation_ic": validation_ic,
+                "incremental_validation_ic": validation_ic - ridge_ic, "nonlinear_enabled": nonlinear_enabled,
+                "ridge_weight": weights[0], "tabm_weight": weights[1], "retrieval_weight": weights[2],
             })
+            for feature, coefficient in zip(linear_feature_names(), ridge[0][1:]):
+                coefficient_rows.append({"refit_month": month, "feature": feature, "standardized_coefficient": coefficient})
             refit_counter = 0
 
-        test = p[(p["month"] == month) & p["eligible"]].copy()
+        all_month = p[p["month"] == month]
+        test = all_month[all_month["eligible"]].copy()
         if fitted is None or test.empty:
             continue
-        standardizer, neural, ridge, medians, retriever, weights = fitted
+        standardizer, neural, ridge, medians, retriever, weights, nonlinear_enabled = fitted
         x_test = standardizer.transform(feature_matrix(test))
-        ridge_test_x, _ = ridge_design(test, medians)
+        ridge_test_x, _ = linear_design(test, medians)
         components = [ridge_predict(ridge_test_x, ridge), neural.predict(x_test), retriever.predict(x_test)]
-        raw_signal = sum(weight * prediction for weight, prediction in zip(weights, components))
-        test["raw_prediction"] = raw_signal
+        test["linear_prediction"] = components[0]
+        test["raw_prediction"] = sum(weight * prediction for weight, prediction in zip(weights, components))
         old = test["Stkcd"].map(previous_signal)
         test["prediction"] = np.where(
             old.notna(), (1 - config.signal_memory) * test["raw_prediction"] + config.signal_memory * old,
             test["raw_prediction"],
         )
         previous_signal = dict(zip(test["Stkcd"], test["prediction"]))
+
+        industry_percentile = test.groupby("industry", dropna=False)["prediction"].rank(pct=True)
+        industry_percentile = industry_percentile.fillna(test["prediction"].rank(pct=True))
+        test["diagnostic_decile"] = np.ceil(industry_percentile * 10).clip(1, 10).astype(int)
+        for decile, group in test.groupby("diagnostic_decile"):
+            decile_rows.append({"month": month + pd.offsets.MonthEnd(1), "decile": decile,
+                                "return": group["forward_return"].mean(), "stocks": len(group)})
+        diag_long_weights, diag_short_weights = industry_balanced_diagnostic(test, config.top_frac)
+        diag_long = dict(zip(test.loc[diag_long_weights.index, "Stkcd"], diag_long_weights))
+        diag_short = dict(zip(test.loc[diag_short_weights.index, "Stkcd"], diag_short_weights))
+        diag_long_turnover = leg_turnover(diag_long, previous_diag_long)
+        diag_short_turnover = leg_turnover(diag_short, previous_diag_short)
+        long_short_gross = (
+            float(np.dot(diag_long_weights, test.loc[diag_long_weights.index, "forward_return"]))
+            - float(np.dot(diag_short_weights, test.loc[diag_short_weights.index, "forward_return"]))
+        )
+        long_short_turnover = diag_long_turnover + diag_short_turnover
 
         count = max(1, int(np.ceil(len(test) * config.top_frac)))
         buffer_count = max(count, int(np.ceil(len(test) * config.buffer_frac)))
@@ -530,55 +575,77 @@ def walk_forward(p: pd.DataFrame, config: Config) -> tuple[pd.DataFrame, pd.Data
         chosen = pd.concat([test[test["Stkcd"].isin(retained)], additions]).drop_duplicates("Stkcd").head(count)
         names = set(chosen["Stkcd"])
         portfolio_weights = pd.Series(1 / len(chosen), index=chosen.index)
-        inverse_volatility_weights = capped_inverse_volatility_weights(chosen)
         current_weights = dict(zip(chosen["Stkcd"], portfolio_weights))
-        if not previous_weights:
-            turnover = 1.0
-        else:
-            union = set(previous_weights) | set(current_weights)
-            turnover = 0.5 * sum(abs(current_weights.get(name, 0) - previous_weights.get(name, 0)) for name in union)
+        union = set(previous_weights) | set(current_weights)
+        turnover = 1.0 if not previous_weights else 0.5 * sum(
+            abs(current_weights.get(name, 0) - previous_weights.get(name, 0)) for name in union
+        )
+        amount_map = dict(zip(all_month["Stkcd"], all_month["amount_clean"]))
+        for name in union:
+            trade_weight = abs(current_weights.get(name, 0) - previous_weights.get(name, 0))
+            if trade_weight > 1e-10:
+                trade_rows.append({
+                    "month": month + pd.offsets.MonthEnd(1), "Stkcd": name, "trade_weight": trade_weight,
+                    "direction": "buy" if current_weights.get(name, 0) > previous_weights.get(name, 0) else "sell",
+                    "average_daily_amount": amount_map.get(name, previous_amount.get(name, np.nan)),
+                    "position_weight_after": current_weights.get(name, 0),
+                })
         weighted_return = float(np.dot(portfolio_weights, chosen["forward_return"]))
-        inverse_volatility_return = float(np.dot(inverse_volatility_weights, chosen["forward_return"]))
         rows.append({
             "month": month + pd.offsets.MonthEnd(1), "gross_return": weighted_return,
-            "inverse_volatility_return": inverse_volatility_return,
             "turnover": turnover, "holdings": len(names), "mean_prediction": chosen["prediction"].mean(),
-            "ridge_weight": weights[0], "tabm_weight": weights[1], "retrieval_weight": weights[2],
+            "cross_sectional_ic": test["prediction"].corr(test["target"], method="spearman"),
+            "linear_ic": test["linear_prediction"].corr(test["target"], method="spearman"),
+            "long_short_gross_return": long_short_gross, "long_short_turnover": long_short_turnover,
+            "diagnostic_long_names": len(diag_long), "diagnostic_short_names": len(diag_short),
+            "nonlinear_enabled": nonlinear_enabled, "ridge_weight": weights[0],
+            "tabm_weight": weights[1], "retrieval_weight": weights[2],
         })
-        previous_names = names
-        previous_weights = current_weights
+        previous_names, previous_weights = names, current_weights
+        previous_amount = {name: amount_map.get(name, previous_amount.get(name, np.nan)) for name in names}
+        previous_diag_long, previous_diag_short = diag_long, diag_short
         refit_counter += 1
 
     result = pd.DataFrame(rows).dropna(subset=["gross_return"])
     result["net_return"] = result["gross_return"] - result["turnover"] * config.cost_bps / 10_000
+    result["long_short_net_return"] = result["long_short_gross_return"] - result["long_short_turnover"] * config.cost_bps / 10_000
     result["advanced_nav"] = (1 + result["net_return"]).cumprod()
-    return result, pd.DataFrame(logs)
+    result["long_short_nav"] = (1 + result["long_short_net_return"]).cumprod()
+    return result, pd.DataFrame(logs), pd.DataFrame(coefficient_rows), pd.DataFrame(decile_rows), pd.DataFrame(trade_rows)
 
 
-def apply_regime_overlay(result: pd.DataFrame, config: Config) -> pd.DataFrame:
-    """Use only prior benchmark returns to reduce exposure in a negative market trend."""
-    result = result.copy()
-    trend = (1 + result["benchmark_return"]).rolling(
-        config.regime_lookback, min_periods=config.regime_lookback
-    ).apply(np.prod, raw=True).shift(1) - 1
-    result["market_trend_3m"] = trend
-    result["exposure"] = np.where(trend.lt(0), config.defensive_exposure, 1.0)
-    result.loc[trend.isna(), "exposure"] = 1.0
-    result["risk_managed_return"] = result["exposure"] * result["net_return"]
-    result["risk_managed_nav"] = (1 + result["risk_managed_return"]).cumprod()
-    return result
+def alpha_diagnostics(result: pd.DataFrame, deciles: pd.DataFrame, logs: pd.DataFrame) -> pd.DataFrame:
+    monthly_ic = result["cross_sectional_ic"].dropna()
+    linear_ic = result["linear_ic"].dropna()
+    long_short = result["long_short_net_return"].dropna()
+    decile_average = deciles.groupby("decile")["return"].mean()
+    monotonicity = decile_average.index.to_series().corr(decile_average, method="spearman")
+    rows = [
+        {"metric": "mean_cross_sectional_ic", "value": monthly_ic.mean()},
+        {"metric": "cross_sectional_icir_annualized", "value": monthly_ic.mean() / monthly_ic.std() * np.sqrt(12)},
+        {"metric": "positive_ic_month_share", "value": (monthly_ic > 0).mean()},
+        {"metric": "mean_linear_ic", "value": linear_ic.mean()},
+        {"metric": "mean_final_minus_linear_ic", "value": (monthly_ic - linear_ic).mean()},
+        {"metric": "long_short_monthly_t_stat", "value": long_short.mean() / (long_short.std() / np.sqrt(len(long_short)))},
+        {"metric": "decile_monotonicity_spearman", "value": monotonicity},
+        {"metric": "nonlinear_refit_share", "value": logs["nonlinear_enabled"].mean()},
+        {"metric": "mean_validation_incremental_ic", "value": logs["incremental_validation_ic"].mean()},
+    ]
+    return pd.DataFrame(rows)
 
 
-def risk_overlay_validation(result: pd.DataFrame) -> pd.DataFrame:
+def capacity_analysis(trades: pd.DataFrame, trading_days: int = 5) -> pd.DataFrame:
     rows = []
-    periods = {
-        "formation_2018_2021": result["month"] < "2022-01-01",
-        "validation_2022_2025": result["month"] >= "2022-01-01",
-        "full_2018_2025": pd.Series(True, index=result.index),
-    }
-    for period, mask in periods.items():
-        for series in ["net_return", "risk_managed_return"]:
-            rows.append({"period": period, "series": series, **metric(result.loc[mask, series])})
+    valid = trades.dropna(subset=["average_daily_amount"]).copy()
+    for capital in [10_000_000, 50_000_000, 100_000_000, 500_000_000, 1_000_000_000]:
+        participation = capital * valid["trade_weight"] / (valid["average_daily_amount"] * trading_days)
+        rows.append({
+            "portfolio_capital_rmb": capital, "execution_days": trading_days,
+            "median_participation": participation.median(), "p90_participation": participation.quantile(0.90),
+            "p95_participation": participation.quantile(0.95), "p99_participation": participation.quantile(0.99),
+            "trades_over_10pct_adv_share": (participation > 0.10).mean(),
+            "trades_over_20pct_adv_share": (participation > 0.20).mean(),
+        })
     return pd.DataFrame(rows)
 
 
@@ -606,24 +673,27 @@ def main() -> None:
     panel = prepare_advanced(args.panel)
     cleaning_report(panel).to_csv(OUT / "data_quality_report.csv", index=False)
     factor_direction_audit(panel).to_csv(OUT / "factor_direction_audit.csv", index=False)
-    result, log = walk_forward(panel, config)
+    result, log, coefficients, deciles, trades = walk_forward(panel, config)
 
     baseline = pd.read_csv(OUT / "deep_learning_backtest.csv", parse_dates=["month"])
     result = result.merge(
         baseline[["month", "net_return", "benchmark_return"]].rename(columns={"net_return": "previous_dl_return"}),
         on="month", how="left",
     )
-    result = apply_regime_overlay(result, config)
     result["previous_dl_nav"] = (1 + result["previous_dl_return"]).cumprod()
     result["benchmark_nav"] = (1 + result["benchmark_return"]).cumprod()
     result.to_csv(OUT / "advanced_backtest.csv", index=False)
     log.to_csv(OUT / "advanced_model_log.csv", index=False)
-    risk_overlay_validation(result).to_csv(OUT / "risk_overlay_validation.csv", index=False)
+    coefficients.to_csv(OUT / "linear_factor_coefficients.csv", index=False)
+    deciles.to_csv(OUT / "decile_returns.csv", index=False)
+    trades.to_csv(OUT / "trade_capacity_inputs.csv", index=False)
+    capacity_analysis(trades).to_csv(OUT / "capacity_analysis.csv", index=False)
+    alpha_diagnostics(result, deciles, log).to_csv(OUT / "alpha_diagnostics.csv", index=False)
     metrics = pd.DataFrame([
-        {"series": "cleaned_tabm_equal_weight", **metric(result["net_return"]),
+        {"series": "cleaned_gated_long_only", **metric(result["net_return"]),
          "avg_turnover": result["turnover"].mean()},
-        {"series": "cleaned_tabm_regime_managed", **metric(result["risk_managed_return"]),
-         "avg_turnover": result["turnover"].mean()},
+        {"series": "industry_neutral_long_short_diagnostic", **metric(result["long_short_net_return"]),
+         "avg_turnover": result["long_short_turnover"].mean()},
         {"series": "previous_mlp_ridge", **metric(result["previous_dl_return"]),
          "avg_turnover": baseline["turnover"].mean()},
         {"series": "benchmark", **metric(result["benchmark_return"]), "avg_turnover": np.nan},
