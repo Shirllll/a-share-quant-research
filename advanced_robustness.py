@@ -15,8 +15,8 @@ def annual_returns(frame: pd.DataFrame) -> pd.DataFrame:
     for year, group in x.groupby("year"):
         rows.append({
             "year": year,
-            "advanced": (1 + group["net_return"]).prod() - 1,
-            "advanced_regime_managed": (1 + group["risk_managed_return"]).prod() - 1,
+            "long_only": (1 + group["net_return"]).prod() - 1,
+            "industry_neutral_long_short": (1 + group["long_short_net_return"]).prod() - 1,
             "previous_dl": (1 + group["previous_dl_return"]).prod() - 1,
             "benchmark": (1 + group["benchmark_return"]).prod() - 1,
         })
@@ -25,19 +25,24 @@ def annual_returns(frame: pd.DataFrame) -> pd.DataFrame:
 
 def cost_stress(frame: pd.DataFrame) -> pd.DataFrame:
     rows = []
-    for bps in [0, 20, 50, 100]:
+    for bps in [0, 20, 50, 100, 150, 200]:
         returns = frame["gross_return"] - frame["turnover"] * bps / 10_000
-        rows.append({"series": "raw", "cost_bps": bps, **metric(returns),
+        long_short = frame["long_short_gross_return"] - frame["long_short_turnover"] * bps / 10_000
+        rows.append({"series": "long_only", "cost_bps": bps, **metric(returns),
                      "avg_turnover": frame["turnover"].mean()})
-        rows.append({"series": "regime_managed", "cost_bps": bps, **metric(frame["exposure"] * returns),
-                     "avg_turnover": frame["turnover"].mean()})
+        rows.append({"series": "industry_neutral_long_short", "cost_bps": bps, **metric(long_short),
+                     "avg_turnover": frame["long_short_turnover"].mean()})
     return pd.DataFrame(rows)
 
 
 def block_bootstrap(frame: pd.DataFrame, simulations: int = 5_000, block: int = 6) -> pd.DataFrame:
     rows = []
-    for series in ["net_return", "risk_managed_return"]:
-        excess = (frame[series] - frame["benchmark_return"]).dropna().to_numpy()
+    series_map = {
+        "long_only_excess": frame["net_return"] - frame["benchmark_return"],
+        "industry_neutral_long_short": frame["long_short_net_return"],
+    }
+    for series, values in series_map.items():
+        excess = values.dropna().to_numpy()
         rng = np.random.default_rng(20260717)
         starts = np.arange(max(1, len(excess) - block + 1))
         blocks_needed = int(np.ceil(len(excess) / block))
@@ -56,11 +61,24 @@ def block_bootstrap(frame: pd.DataFrame, simulations: int = 5_000, block: int = 
     return pd.DataFrame(rows)
 
 
+def subperiod_stability(frame: pd.DataFrame) -> pd.DataFrame:
+    rows = []
+    periods = {
+        "2018_2021": frame["month"] < "2022-01-01",
+        "2022_2025": frame["month"] >= "2022-01-01",
+    }
+    for period, mask in periods.items():
+        for series in ["net_return", "long_short_net_return"]:
+            rows.append({"period": period, "series": series, **metric(frame.loc[mask, series])})
+    return pd.DataFrame(rows)
+
+
 def main() -> None:
     frame = pd.read_csv(OUT / "advanced_backtest.csv", parse_dates=["month"])
     annual_returns(frame).to_csv(OUT / "advanced_annual.csv", index=False)
     cost_stress(frame).to_csv(OUT / "advanced_cost_stress.csv", index=False)
     block_bootstrap(frame).to_csv(OUT / "advanced_bootstrap.csv", index=False)
+    subperiod_stability(frame).to_csv(OUT / "advanced_subperiod.csv", index=False)
     print(cost_stress(frame).to_string(index=False))
     print(block_bootstrap(frame).to_string(index=False))
 
