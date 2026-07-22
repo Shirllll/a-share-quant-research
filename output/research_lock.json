@@ -53,8 +53,8 @@
   "retrospective_used_for_parameter_selection": false,
   "selection_passed_all_constraints": true,
   "selected_neighbor_robust_share": 1.0,
-  "git_commit": "bc6d4c404996dff5dd93b9c9e3a1664ae8372769",
-  "run_time_utc": "2026-07-22T13:11:37.406121+00:00",
+  "git_commit": "a847784b9922affc54be37ae47feba6cfcc96ce1",
+  "run_time_utc": "2026-07-22T13:22:00+00:00",
   "code_sha256": {
     "data_cleaning.py": "2c72482e439b4a7c7067ef9b7e92ee7a705fac0dbc590c6525fa99ae9604987c",
     "quant_project.py": "be2495545c9edea2867e132007d75a2601bc611e06a4a96c3289ac316ea064ef",
