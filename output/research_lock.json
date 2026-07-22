@@ -1,0 +1,66 @@
+{
+  "lock_version": 1,
+  "status": "frozen_for_true_forward_from_2026",
+  "frozen_config": {
+    "formation_start": "2014-01-01",
+    "development_start": "2018-01-01",
+    "selection_start": "2022-01-01",
+    "retrospective_start": "2024-01-01",
+    "retrospective_end": "2025-12-31",
+    "true_forward_start": "2026-01-01",
+    "train_months": 84,
+    "validation_months": 12,
+    "refit_months": 3,
+    "max_ridge_samples": 150000,
+    "top_fraction": 0.1,
+    "smoothing_weight": 1.0,
+    "exit_fraction": 0.25,
+    "hurdle_multiple": 1.5,
+    "fixed_cost_bps": 20.0,
+    "base_cost": 0.002,
+    "impact_coefficient": 0.1,
+    "impact_ratio_floor": 0.0,
+    "impact_ratio_cap": 0.25,
+    "execution_days": 5,
+    "portfolio_capital_rmb": 50000000,
+    "max_adv_participation_5d": 0.1,
+    "seed": 20260722
+  },
+  "selected_parameters": {
+    "smoothing_weight": 1.0,
+    "exit_fraction": 0.25,
+    "hurdle_multiple": 1.5
+  },
+  "data_intervals": {
+    "formation": [
+      "2014-01-01",
+      "2017-12-31"
+    ],
+    "development": [
+      "2018-01-01",
+      "2021-12-31"
+    ],
+    "selection": [
+      "2022-01-01",
+      "2023-12-31"
+    ],
+    "retrospective_test": [
+      "2024-01-01",
+      "2025-12-31"
+    ],
+    "true_forward_start": "2026-01-01"
+  },
+  "retrospective_used_for_parameter_selection": false,
+  "selection_passed_all_constraints": true,
+  "selected_neighbor_robust_share": 1.0,
+  "git_commit": "02f286694ec5cc2ef4724ee0154401f9e2c7f246",
+  "run_time_utc": "2026-07-22T13:01:52.685224+00:00",
+  "code_sha256": {
+    "data_cleaning.py": "2c72482e439b4a7c7067ef9b7e92ee7a705fac0dbc590c6525fa99ae9604987c",
+    "quant_project.py": "be2495545c9edea2867e132007d75a2601bc611e06a4a96c3289ac316ea064ef",
+    "advanced_quant.py": "2c678c4e8913bd405a4f6d0fbbe0685f5a8fbcc1cf19768bbe232b2786df33d0",
+    "turnover_aware_quant.py": "a789a152293b9436ca45e0ce1624a707394bca1a19351dd7ef8881bfee8b8833",
+    "turnover_aware_robustness.py": "036db1196a0c211de5023ce34d51c31ceac514c8e4cfc79b85dbe061c4360c61",
+    "test_turnover_aware_quant.py": "8356ed77227206f0ce242ff509a4250fd4857e7002b3e2337c328b1717c13560"
+  }
+}

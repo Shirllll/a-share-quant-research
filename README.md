@@ -114,3 +114,105 @@ python -m unittest -q test_advanced_quant.py
 ## 8. 当前研究边界
 
 本项目仍缺少逐笔/盘口数据、涨跌停排队成交、融券可得性与借券费、指数成分和行业风险模型、真实冲击函数以及实盘订单回报。现有容量表也只覆盖多头组合，不能外推到融券组合。因此当前结果最多证明“月频截面信号值得继续研究”，不能证明“策略可以带资上线”。下一步优先事项是降低行业中性多空换手、做完全隔离的滚动留出期验证，并用真实可成交价格和融券池重估净 Alpha；继续堆叠更复杂网络不是优先事项。
+
+## 9. 换手约束版本
+
+`turnover_aware_quant.py` 是独立于当前高级版本的纯 Ridge 研究路径，不修改 `advanced_quant.py`，也不让 TabM 或历史相似样本检索进入正式候选信号。它没有增加新因子，只在现有 Ridge 分数之后依次应用信号平滑、非对称进入/退出缓冲和成本感知替换。
+
+### 时间分区与冻结规则
+
+- formation：2014-01 至 2017-12，只用于既有因子方向审计；
+- development：2018-01 至 2021-12；
+- selection：2022-01 至 2023-12；
+- retrospective_test：2024-01 至 2025-12；由于最后一个可实现标签来自2025-11信号，实际回顾性收益有23个月；
+- true_forward_start：2026-01-01。
+
+2018—2025已经被反复查看，因此2024—2025只能称为回顾性测试，不能重新包装成完全未见样本。18组参数网格只接收 development 和 selection 行；选定参数后才运行一次 retrospective_test。最终配置、区间、随机种子、代码SHA-256、运行时间和Git提交保存在 `output/research_lock.json`。2026年以后才是冻结参数后的真正前向验证。
+
+为完整复现2014—2017 formation，月度面板需要从2014开始生成。任务指定的2016起始命令已经做过运行回归，但它本身不足以覆盖完整formation：
+
+```powershell
+python quant_project.py --start 2014-01-01 --end 2025-12-31
+python advanced_quant.py --start 2018-01-01
+python turnover_aware_quant.py
+python turnover_aware_robustness.py
+python -m unittest -q test_advanced_quant.py
+python -m unittest -q test_turnover_aware_quant.py
+```
+
+### 规则选择结果
+
+只比较了预先声明的小网格：`smoothing_weight ∈ {1.00, 0.75, 0.50}`、`exit_fraction ∈ {0.20, 0.25}`、`hurdle_multiple ∈ {1.0, 1.5, 2.0}`。selection期综合50bp净Sharpe、换手、IC、分组单调性和相邻参数稳定性后，冻结参数为：
+
+- `smoothing_weight = 1.00`；
+- `exit_fraction = 0.25`；
+- `hurdle_multiple = 1.5`；
+- 5日执行、5000万元默认组合规模、单只股票最高10%五日ADV参与率；
+- 基础成本20bp，冲击代理系数0.10，根号内参与率截断至 `[0, 0.25]`。
+
+`smoothing_weight = 1.00` 表明本次数据没有支持额外时间平滑；实际换手下降来自25%退出缓冲和1.5倍成本门槛。所选参数的4个相邻候选全部保持“selection期50bp Sharpe为正、换手下降至少25%、IC下降不超过0.005”，所以开发/选择期结论不依赖唯一一个精确参数。但回顾性结果没有参与邻域复选，不能据此声称回顾期也已完成参数稳健性搜索。
+
+### 与当前高级版本的同口径比较
+
+完整比较覆盖2018-01至2025-11信号、对应95个月收益。固定成本仍按换手直接扣减。
+
+| 指标 | 当前高级版本 | 换手约束Ridge | 变化 |
+|---|---:|---:|---:|
+| 平均月度Rank IC | 0.1171 | 0.1210 | +0.0039 |
+| 年化ICIR | 3.071 | 3.245 | +0.174 |
+| 正IC月份比例 | 87.37% | 85.26% | -2.11个百分点 |
+| 十分组单调性 | 0.952 | 0.964 | +0.012 |
+| 多空20bp月收益t值 | 3.54 | 2.94 | -0.60 |
+| 多头月均换手 | 34.86% | 18.72% | **下降46.31%** |
+| 多空月均换手 | 113.17% | 43.62% | **下降61.46%** |
+
+| 多空诊断 | 当前高级版本 | 换手约束Ridge | 变化 |
+|---|---:|---:|---:|
+| 20bp年化收益 | 20.62% | 15.82% | -4.80个百分点 |
+| 20bp Sharpe | 1.302 | 1.037 | -0.265 |
+| 50bp Sharpe | **1.000** | **0.919** | **-0.081** |
+| 100bp Sharpe | 0.521 | 0.725 | +0.204 |
+| 20bp最大回撤 | -21.93% | -22.99% | -1.06个百分点 |
+
+换手下降使高成本尾部明显改善：100bp下多空年化收益由8.29%升至11.10%。但它牺牲了过多毛Alpha，50bp下反而弱于当前版本，因此没有通过正式候选的硬条件。
+
+### 分时期结果
+
+下表是换手约束多空诊断组合，全部为固定20bp成本：
+
+| 阶段 | 年化收益 | Sharpe | 最大回撤 | 月均换手 |
+|---|---:|---:|---:|---:|
+| development | 17.77% | 1.449 | -10.26% | 42.55% |
+| selection | 28.24% | 2.134 | -4.37% | 49.74% |
+| retrospective_test | **0.55%** | **0.026** | **-22.99%** | 39.47% |
+
+retrospective_test在20bp下勉强保持正收益，但50bp年化收益为-0.87%、Sharpe为-0.040。selection到回顾期的明显衰减说明历史选择结果不能外推为可投资收益。
+
+换手约束多头组合在20bp下年化9.30%、Sharpe 0.490、最大回撤-26.86%，仍不达到独立策略的可投门槛。其回顾期表现较强，但selection期20bp收益为负，稳定性不足。
+
+### 成本与容量代理
+
+冲击代理使用月内平均日成交额、年化波动率、5日执行和订单金额：
+
+`base_cost + impact_coefficient × volatility × sqrt(clipped(order_value / (ADV × 5)))`
+
+它只是流动性分层代理，不是真实市场冲击函数。按该代理，5000万元多头组合Sharpe为0.447，多空诊断Sharpe为0.881；后者仍未计融券可得性、借券费和基差。多头交易在1亿元规模下五日ADV参与率p99约0.34%，但该数字依赖 `amount_clean` 作为ADV近似，不能视为正式容量证明。
+
+### 最终验收结论
+
+截面Alpha仍然存在：Rank IC、ICIR和十分组单调性没有因换手控制而消失。换手控制也确实把多空换手降低超过25%，且100bp净表现改善；参数选择期有多个相邻配置给出一致方向。
+
+但是本版本**验收失败，不能升级为生产候选**，原因是50bp全样本净Sharpe低于当前版本，并且回顾性测试在50bp下转负。按照预先声明的失败规则，到此停止，不继续增加模型或因子。行业中性多空仍只是未模拟融券约束的研究上界；2026年以后应严格保持 `research_lock.json` 不变，积累真正前向结果。
+
+新增输出：
+
+- `output/turnover_aware_backtest.csv`：逐月信号、实现月份、时期、IC、收益和多空两侧换手；
+- `output/turnover_aware_metrics.csv`：20bp与流动性代理成本汇总；
+- `output/turnover_aware_cost_stress.csv`：与当前版本的0至200bp同口径压力测试；
+- `output/turnover_aware_subperiod.csv`：三个研究阶段在20/50/100bp下的表现；
+- `output/turnover_aware_trade_log.csv`：实际与被拒绝交易、预期Alpha、成本和ADV参与率；
+- `output/turnover_aware_capacity.csv`：1000万、5000万和1亿元多头容量代理；
+- `output/turnover_aware_parameter_selection.csv`：仅development/selection参数比较；
+- `output/turnover_aware_decile_returns.csv`：行业内十分组收益；
+- `output/turnover_aware_alpha_diagnostics.csv`：与当前高级版本的核心指标对比；
+- `output/research_lock.json`：2026前向验证冻结配置。
