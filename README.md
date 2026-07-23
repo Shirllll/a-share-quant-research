@@ -246,3 +246,73 @@ retrospective_test在20bp下勉强保持正收益，但50bp年化收益为-0.80%
 - `output/turnover_aware_decile_returns.csv`：行业内十分组收益；
 - `output/turnover_aware_alpha_diagnostics.csv`：与当前高级版本的核心指标对比；
 - `output/research_lock.json`：2026前向验证冻结配置。
+
+## 10. 低换手下的 Sharpe 改进实验
+
+本节不修改第9节已经冻结的季度调仓配置，也不增加因子或模型。所有方法继续使用同一份清洗后纯 Ridge 分数，只在 development（2018—2021）和 selection（2022—2023）比较组合执行方式；2024—2025仍只作参数冻结后的回顾性测试。
+
+依次测试了三种方法：
+
+1. **月度小步调仓＋硬换手预算**：每月向最新目标移动一部分。3×3预算网格没有任何组合同时满足“selection期50bp Sharpe提高且换手不超过季度版”，实验失败并保留在 `output/turnover_budget_parameter_selection.csv`。
+2. **2/3/4个交错袖套**：每月只更新一个子组合。2袖套提高了selection Sharpe，但selection多空换手高出季度版4.79%；3/4袖套降低换手却没有提高Sharpe，因此均未单独通过。
+3. **2袖套＋硬换手上限**：袖套保持信号新鲜度，再对合并后的实际权重设置多头15%、多空每腿20%的月度上限。该组合通过开发/选择期的收益、换手和最低投入约束。
+
+### 参数选择证据
+
+| 指标（selection） | 季度低换手版 | 2袖套＋硬上限 | 变化 |
+|---|---:|---:|---:|
+| 多空月均换手 | 37.57% | 37.31% | -0.26个百分点 |
+| 多空20bp Sharpe | 1.749 | 1.783 | +0.034 |
+| 多空50bp Sharpe | 1.619 | 1.661 | +0.042 |
+| 多空100bp Sharpe | 1.405 | 1.462 | +0.057 |
+| 最低诊断腿平均投入 | — | 94.93% | — |
+
+development期50bp Sharpe也由1.103提高至1.176。选参表中的 `uses_retrospective_test` 全部为 `False`。
+
+但该增量存在参数边界敏感性：把每腿上限从20%降到17.5%后，selection期换手进一步降至34.30%，50bp Sharpe却降到1.605，略低于季度版1.619。因此20%配置只能视为实验候选，不能声称形成稳定的新生产参数。
+
+### 完整历史比较
+
+下表使用双方共同的95个月。固定成本仍按真实权重换手扣减。
+
+| 指标 | 季度低换手版 | 2袖套＋硬上限 | 变化 |
+|---|---:|---:|---:|
+| 多头月均换手 | 14.94% | 14.98% | +0.04个百分点 |
+| 多空月均换手 | 37.82% | 35.41% | **下降2.41个百分点** |
+| 多头20bp Sharpe | 0.480 | 0.492 | +0.012 |
+| 多头50bp Sharpe | 0.449 | 0.460 | +0.010 |
+| 多空20bp Sharpe | 0.899 | 0.914 | +0.015 |
+| 多空50bp Sharpe | 0.792 | 0.814 | +0.022 |
+| 多空100bp Sharpe | 0.617 | 0.650 | +0.033 |
+
+完整历史上实现了“多空换手更低且各成本档Sharpe略高”，但提升幅度很小。平均多头投入94.02%，诊断多头腿94.87%、空头腿98.81%；结果不是完全空仓得到的，但约5%的现金比例确实降低了风险暴露，必须与Sharpe一起披露。
+
+### 分时期失败点
+
+多空诊断组合在20bp下：
+
+| 阶段 | 年化收益 | Sharpe | 月均换手 |
+|---|---:|---:|---:|
+| development | 15.11% | 1.309 | 36.71% |
+| selection | 23.64% | 1.783 | 37.31% |
+| retrospective_test | **-0.97%** | **-0.050** | 30.73% |
+
+回顾期50bp Sharpe进一步降至-0.106。也就是说，这个方法达到了开发/选择期和完整历史的机械目标，但没有修复2024—2025的 Alpha 衰减。因此它仍是研究实验，不替代原冻结配置，也不能升级为可投策略。
+
+新增运行命令：
+
+```powershell
+python turnover_budget_quant.py
+python staggered_turnover_quant.py --reuse-score-cache
+python -m unittest -q test_turnover_budget_quant.py
+python -m unittest -q test_staggered_turnover_quant.py
+```
+
+新增输出：
+
+- `output/turnover_budget_parameter_selection.csv`：月度小步调仓失败网格；
+- `output/staggered_turnover_parameter_selection.csv`：袖套数量与硬上限选择证据；
+- `output/staggered_turnover_backtest.csv`：实际投入、换手、收益和时间边界；
+- `output/staggered_turnover_comparison.csv`：与季度低换手版的95个月对比；
+- `output/staggered_turnover_subperiod.csv`：三个阶段的20/50/100bp结果；
+- `output/staggered_turnover_lock.json`：独立实验配置与代码哈希。
