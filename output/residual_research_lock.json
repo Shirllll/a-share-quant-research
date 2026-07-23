@@ -55,8 +55,8 @@
     "market_impact": "The square-root cost term is a liquidity stratification proxy, not a calibrated impact model.",
     "shorting": "Borrow availability, borrow fees and short-sale execution are absent; short legs remain diagnostic."
   },
-  "git_commit": "30335b0353d77f2842736bdbc12eeb33b0e38557",
-  "run_time_utc": "2026-07-23T06:49:32.767292+00:00",
+  "git_commit": "4f71a62871d8828e4a8b987c8b272d5c8bd0e615",
+  "run_time_utc": "2026-07-23T06:57:11.721696+00:00",
   "code_sha256": {
     "data_cleaning.py": "2c72482e439b4a7c7067ef9b7e92ee7a705fac0dbc590c6525fa99ae9604987c",
     "advanced_quant.py": "2c678c4e8913bd405a4f6d0fbbe0685f5a8fbcc1cf19768bbe232b2786df33d0",
