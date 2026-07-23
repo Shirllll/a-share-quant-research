@@ -286,10 +286,12 @@ def main() -> None:
     m.to_csv(OUT / "metrics.csv", index=False)
     factor_ic(p, not args.no_quality).to_csv(OUT / "factor_ic.csv", index=False)
     try:
+        import matplotlib
+        matplotlib.use("Agg")
         import matplotlib.pyplot as plt
         ax = r.plot(x="month", y=["strategy_nav", "risk_managed_nav", "benchmark_nav"], figsize=(10, 5), grid=True)
         ax.set_ylabel("NAV"); ax.figure.tight_layout(); ax.figure.savefig(OUT / "nav.png", dpi=160); plt.close(ax.figure)
-    except ImportError:
+    except (ImportError, RuntimeError):
         pass
     print(m.to_string(index=False))
 

@@ -523,8 +523,15 @@ def walk_forward(p: pd.DataFrame, config: Config):
                 x_full, y_full, full_frame["month"].to_numpy()
             )
             fitted = (standardizer, neural, ridge, medians, retriever, weights, nonlinear_enabled)
+            history_start = history["month"].min()
+            history_end = history["month"].max()
+            max_label_realization_month = history_end + pd.offsets.MonthEnd(1)
             logs.append({
-                "refit_month": month, "history_samples": len(history), "ridge_samples": len(ridge_full),
+                "refit_month": month, "prediction_month": month,
+                "history_start": history_start, "history_end": history_end,
+                "max_label_realization_month": max_label_realization_month,
+                "future_leakage_pass": max_label_realization_month <= month,
+                "history_samples": len(history), "ridge_samples": len(ridge_full),
                 "ridge_alpha": ridge_alpha, "best_epoch": best_epoch, "ridge_validation_ic": ridge_ic,
                 "tabm_validation_ic": neural_ic, "selected_validation_ic": validation_ic,
                 "incremental_validation_ic": validation_ic - ridge_ic, "nonlinear_enabled": nonlinear_enabled,
@@ -614,6 +621,25 @@ def walk_forward(p: pd.DataFrame, config: Config):
     return result, pd.DataFrame(logs), pd.DataFrame(coefficient_rows), pd.DataFrame(decile_rows), pd.DataFrame(trade_rows)
 
 
+def leakage_audit(logs: pd.DataFrame) -> pd.DataFrame:
+    """Machine-check that every training label was realised by the signal month."""
+    columns = [
+        "refit_month", "prediction_month", "history_start", "history_end",
+        "max_label_realization_month", "future_leakage_pass",
+    ]
+    audit = logs[columns].copy()
+    for column in columns[:-1]:
+        audit[column] = pd.to_datetime(audit[column])
+    audit["future_leakage_pass"] = (
+        audit["future_leakage_pass"].astype(bool)
+        & audit["history_end"].lt(audit["prediction_month"])
+        & audit["max_label_realization_month"].le(audit["prediction_month"])
+    )
+    if not audit["future_leakage_pass"].all():
+        raise RuntimeError("Future leakage audit failed: a training label extends beyond its prediction month")
+    return audit
+
+
 def alpha_diagnostics(result: pd.DataFrame, deciles: pd.DataFrame, logs: pd.DataFrame) -> pd.DataFrame:
     monthly_ic = result["cross_sectional_ic"].dropna()
     linear_ic = result["linear_ic"].dropna()
@@ -675,15 +701,15 @@ def main() -> None:
     factor_direction_audit(panel).to_csv(OUT / "factor_direction_audit.csv", index=False)
     result, log, coefficients, deciles, trades = walk_forward(panel, config)
 
-    baseline = pd.read_csv(OUT / "deep_learning_backtest.csv", parse_dates=["month"])
+    baseline = pd.read_csv(OUT / "backtest_monthly.csv", parse_dates=["month"])
     result = result.merge(
-        baseline[["month", "net_return", "benchmark_return"]].rename(columns={"net_return": "previous_dl_return"}),
+        baseline[["month", "benchmark_return"]],
         on="month", how="left",
     )
-    result["previous_dl_nav"] = (1 + result["previous_dl_return"]).cumprod()
-    result["benchmark_nav"] = (1 + result["benchmark_return"]).cumprod()
+    result["benchmark_nav"] = (1 + result["benchmark_return"].fillna(0)).cumprod()
     result.to_csv(OUT / "advanced_backtest.csv", index=False)
     log.to_csv(OUT / "advanced_model_log.csv", index=False)
+    leakage_audit(log).to_csv(OUT / "advanced_leakage_audit.csv", index=False)
     coefficients.to_csv(OUT / "linear_factor_coefficients.csv", index=False)
     deciles.to_csv(OUT / "decile_returns.csv", index=False)
     trades.to_csv(OUT / "trade_capacity_inputs.csv", index=False)
@@ -694,8 +720,6 @@ def main() -> None:
          "avg_turnover": result["turnover"].mean()},
         {"series": "industry_neutral_long_short_diagnostic", **metric(result["long_short_net_return"]),
          "avg_turnover": result["long_short_turnover"].mean()},
-        {"series": "previous_mlp_ridge", **metric(result["previous_dl_return"]),
-         "avg_turnover": baseline["turnover"].mean()},
         {"series": "benchmark", **metric(result["benchmark_return"]), "avg_turnover": np.nan},
     ])
     metrics.to_csv(OUT / "advanced_metrics.csv", index=False)

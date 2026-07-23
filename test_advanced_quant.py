@@ -9,6 +9,7 @@ from advanced_quant import (
     TemporalRetriever,
     _select_blend,
     industry_balanced_diagnostic,
+    leakage_audit,
     leg_turnover,
     monthly_rank_ic,
 )
@@ -64,6 +65,21 @@ class AdvancedModelTests(unittest.TestCase):
             leg_turnover({"A": 0.5, "C": 0.5}, {"A": 0.5, "B": 0.5}),
             0.5,
         )
+
+    def test_leakage_audit_requires_realised_training_labels(self):
+        valid = pd.DataFrame({
+            "refit_month": ["2024-03-31"],
+            "prediction_month": ["2024-03-31"],
+            "history_start": ["2018-01-31"],
+            "history_end": ["2024-02-29"],
+            "max_label_realization_month": ["2024-03-31"],
+            "future_leakage_pass": [True],
+        })
+        self.assertTrue(leakage_audit(valid)["future_leakage_pass"].all())
+        invalid = valid.copy()
+        invalid["max_label_realization_month"] = "2024-04-30"
+        with self.assertRaises(RuntimeError):
+            leakage_audit(invalid)
 
 
 if __name__ == "__main__":
