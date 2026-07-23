@@ -1,0 +1,3 @@
+test,delay_trading_days,calculation,annual_return,annual_volatility,sharpe_rf0,max_drawdown,total_return,months,maximum_unresolved_weight
+delay_1_trading_day,1,actual daily returns after the stated market trading-day delay,0.06587067270501246,0.18912209449218761,0.3482970769855422,-0.21878838606654727,0.5880263995558301,87,0.0144416799972477
+delay_5_trading_days,5,actual daily returns after the stated market trading-day delay,-0.009705113603669102,0.1435018731834687,-0.06763057086551762,-0.3200061234427487,-0.06674827771074754,85,0.0217974403000277

@@ -1,0 +1,6 @@
+check,passed,evidence
+ridge_alpha_selection_excludes_retrospective_test,True,selection maximum=2023-12-31; retrospective starts=2024-01-01
+all_training_labels_realized_before_prediction,True,maximum training label realization is earlier than every refit month
+three_month_purge_and_embargo,True,3m rows use a 3m purge and a 3m validation-to-test embargo
+features_not_after_signal,True,prepare_advanced features and risk exposures end at signal month
+prediction_months_are_fixed,True,historical prediction window ends with the 2025-11 signal

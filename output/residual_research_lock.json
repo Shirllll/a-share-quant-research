@@ -1,0 +1,69 @@
+{
+  "lock_version": 1,
+  "status": "research_failed_not_a_forward_candidate",
+  "research_name": "residual_multi_horizon_ridge_cost_aware_portfolio",
+  "frozen_config": {
+    "target_type": "original_1m",
+    "portfolio_type": "cost_aware",
+    "lambda_risk": 0.5,
+    "lambda_turnover": 2.0,
+    "max_stock_weight": 0.02,
+    "min_holdings": 80,
+    "max_holdings": 200,
+    "industry_absolute_cap": 0.2,
+    "industry_deviation_cap": 0.05,
+    "style_exposure_tolerance": 0.35,
+    "max_cash_weight": 0.05,
+    "portfolio_capital_rmb": 50000000.0,
+    "max_adv_participation_5d": 0.1,
+    "execution_days": 5,
+    "base_cost": 0.002,
+    "impact_coefficient": 0.1,
+    "impact_ratio_cap": 0.25,
+    "seed": 20260723
+  },
+  "selected_parameters": {
+    "target_type": "original_1m",
+    "portfolio_type": "cost_aware",
+    "lambda_risk": 0.5,
+    "lambda_turnover": 2.0
+  },
+  "data_intervals": {
+    "formation": [
+      "2014-01-01",
+      "2017-12-31"
+    ],
+    "development": [
+      "2018-01-01",
+      "2021-12-31"
+    ],
+    "selection": [
+      "2022-01-01",
+      "2023-12-31"
+    ],
+    "retrospective_test": [
+      "2024-01-01",
+      "2025-12-31"
+    ],
+    "true_forward_start": "2026-01-01"
+  },
+  "retrospective_used_for_parameter_selection": false,
+  "selection_passed_constraints": false,
+  "limitations": {
+    "market_beta": "12-month monthly-return beta is used; daily beta was not added as a new predictor.",
+    "benchmark_weights": "Historical index constituent weights are absent; the eligible monthly pool is the exposure reference.",
+    "market_impact": "The square-root cost term is a liquidity stratification proxy, not a calibrated impact model.",
+    "shorting": "Borrow availability, borrow fees and short-sale execution are absent; short legs remain diagnostic."
+  },
+  "git_commit": "30335b0353d77f2842736bdbc12eeb33b0e38557",
+  "run_time_utc": "2026-07-23T06:49:32.767292+00:00",
+  "code_sha256": {
+    "data_cleaning.py": "2c72482e439b4a7c7067ef9b7e92ee7a705fac0dbc590c6525fa99ae9604987c",
+    "advanced_quant.py": "2c678c4e8913bd405a4f6d0fbbe0685f5a8fbcc1cf19768bbe232b2786df33d0",
+    "residual_common.py": "beaad28fc264b3c713a9c365ac454b06a1d062e8eff6b015493e1f8dd87f785f",
+    "residual_target_quant.py": "a7eed69b88ee35713ca7e760fc9f55fba02ef3b31e4be5a6f7d390b88c59ff5e",
+    "cost_aware_portfolio.py": "7acee073fa45270945eea0d5940ed9bab4811da98b91dd398455378c85a4c0fc",
+    "tradable_return_engine.py": "6fc426ac1a1467fc5bdc7eea9e801b468fdcb2e018144d89f41dcc68ff9ae87e",
+    "residual_robustness.py": "667092867823cfbf37c574a6d7aa838bb778e70dd18244a17661b7ea404e7515"
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "method": "parameter_free_alpha_decay_diagnostics",
+  "short_leg_sign_convention": "short_sale_gross_return is positive when the sold-short bottom leg falls",
+  "top_bottom_spread": {
+    "development": 0.02113272148109676,
+    "retrospective_test": 0.01203720483904192,
+    "selection": 0.028027396618966364
+  },
+  "retrospective_leg_mean_returns_20bps": {
+    "long_net_return_20bps": 0.0207341742256953,
+    "short_sale_net_return_20bps": -0.012572399719815542
+  },
+  "retrospective_zero_cost_annualized_mean": 0.03328773596397746,
+  "retrospective_20bps_annualized_mean": 0.02486300900432388,
+  "retrospective_50bps_annualized_mean": 0.012225918564843553,
+  "retrospective_100bps_annualized_mean": -0.008835898834290357,
+  "limitations": {
+    "market_beta": "12-month monthly-return beta is used; daily beta was not added as a new predictor.",
+    "benchmark_weights": "Historical index constituent weights are absent; the eligible monthly pool is the exposure reference.",
+    "market_impact": "The square-root cost term is a liquidity stratification proxy, not a calibrated impact model.",
+    "shorting": "Borrow availability, borrow fees and short-sale execution are absent; short legs remain diagnostic."
+  }
+}
