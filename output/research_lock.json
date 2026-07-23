@@ -11,11 +11,12 @@
     "train_months": 84,
     "validation_months": 12,
     "refit_months": 3,
+    "rebalance_frequency_months": 3,
     "max_ridge_samples": 150000,
     "top_fraction": 0.1,
     "smoothing_weight": 1.0,
     "exit_fraction": 0.25,
-    "hurdle_multiple": 1.5,
+    "hurdle_multiple": 1.0,
     "fixed_cost_bps": 20.0,
     "base_cost": 0.002,
     "impact_coefficient": 0.1,
@@ -29,7 +30,7 @@
   "selected_parameters": {
     "smoothing_weight": 1.0,
     "exit_fraction": 0.25,
-    "hurdle_multiple": 1.5
+    "hurdle_multiple": 1.0
   },
   "data_intervals": {
     "formation": [
@@ -53,14 +54,16 @@
   "retrospective_used_for_parameter_selection": false,
   "selection_passed_all_constraints": true,
   "selected_neighbor_robust_share": 1.0,
-  "git_commit": "a847784b9922affc54be37ae47feba6cfcc96ce1",
-  "run_time_utc": "2026-07-22T13:22:00+00:00",
+  "git_commit": "11e9dec9a94ea4cfddd0f01a99de8b9d5a54aa01",
+  "run_time_utc": "2026-07-23T01:48:59.451438+00:00",
   "code_sha256": {
     "data_cleaning.py": "2c72482e439b4a7c7067ef9b7e92ee7a705fac0dbc590c6525fa99ae9604987c",
     "quant_project.py": "be2495545c9edea2867e132007d75a2601bc611e06a4a96c3289ac316ea064ef",
     "advanced_quant.py": "2c678c4e8913bd405a4f6d0fbbe0685f5a8fbcc1cf19768bbe232b2786df33d0",
-    "turnover_aware_quant.py": "a789a152293b9436ca45e0ce1624a707394bca1a19351dd7ef8881bfee8b8833",
-    "turnover_aware_robustness.py": "036db1196a0c211de5023ce34d51c31ceac514c8e4cfc79b85dbe061c4360c61",
-    "test_turnover_aware_quant.py": "8356ed77227206f0ce242ff509a4250fd4857e7002b3e2337c328b1717c13560"
+    "model_comparison_quant.py": "61ffd9f9b40ae1e4104b09ca0e64d5d378de3b1d9f60c3d524afe0e5c0efcff4",
+    "turnover_aware_quant.py": "6e128160db1ecafb18ef3ab1972e5e5acd9d2531b86bef814b9e41382b69c43d",
+    "turnover_aware_robustness.py": "e80b9fc2cd62454d1f82090c3108fb1cfea21b39207b25e035ef40ae2d84e3a0",
+    "test_model_comparison_quant.py": "519ddc03d61e4a987ca93875b9ec7cc0bde9fd75f75a70b5e1d4a69873cae416",
+    "test_turnover_aware_quant.py": "b65821ae8253b4cda13ab8623b8f3c99982afe9be890c8b2eb515731fecf1e9e"
   }
 }
