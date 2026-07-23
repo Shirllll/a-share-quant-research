@@ -1,0 +1,42 @@
+{
+  "lock_version": 1,
+  "status": "experimental_frozen_for_forward_observation",
+  "method": "monthly_partial_rebalance_with_hard_turnover_budget",
+  "budget_config": {
+    "long_monthly_turnover_budget": 0.1,
+    "diagnostic_leg_monthly_turnover_budget": 0.2,
+    "seed": 20260723
+  },
+  "fixed_signal_config": {
+    "smoothing_weight": 1.0,
+    "exit_fraction": 0.25,
+    "hurdle_multiple": 1.0,
+    "ridge_only": true
+  },
+  "selection_passed_constraints": false,
+  "retrospective_used_for_parameter_selection": false,
+  "data_intervals": {
+    "development": [
+      "2018-01-01",
+      "2021-12-31"
+    ],
+    "selection": [
+      "2022-01-01",
+      "2023-12-31"
+    ],
+    "retrospective_test": [
+      "2024-01-01",
+      "2025-12-31"
+    ],
+    "true_forward_start": "2026-01-01"
+  },
+  "git_commit": "bade5bff77fcf62387a9c69fb460db6e26c2b329",
+  "run_time_utc": "2026-07-23T03:59:03.226212+00:00",
+  "code_sha256": {
+    "data_cleaning.py": "2c72482e439b4a7c7067ef9b7e92ee7a705fac0dbc590c6525fa99ae9604987c",
+    "advanced_quant.py": "2c678c4e8913bd405a4f6d0fbbe0685f5a8fbcc1cf19768bbe232b2786df33d0",
+    "turnover_aware_quant.py": "6e128160db1ecafb18ef3ab1972e5e5acd9d2531b86bef814b9e41382b69c43d",
+    "turnover_budget_quant.py": "c9e4bdc79dace267c552d26a02b551543175baa32049d1256d5baeec856fd84b",
+    "test_turnover_budget_quant.py": "597c2a2c004a4dbbfb96a6a9e8b3c70c7e09e55429997def6e565b2a0abd6924"
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "lock_version": 1,
+  "status": "experimental_frozen_for_forward_observation",
+  "method": "staggered_ridge_sleeves",
+  "config": {
+    "sleeves": 2,
+    "long_monthly_turnover_cap": 0.15,
+    "diagnostic_leg_monthly_turnover_cap": 0.2,
+    "seed": 20260723
+  },
+  "selection_passed_constraints": true,
+  "retrospective_used_for_parameter_selection": false,
+  "git_commit": "bade5bff77fcf62387a9c69fb460db6e26c2b329",
+  "run_time_utc": "2026-07-23T03:59:04.098369+00:00",
+  "code_sha256": {
+    "data_cleaning.py": "2c72482e439b4a7c7067ef9b7e92ee7a705fac0dbc590c6525fa99ae9604987c",
+    "advanced_quant.py": "2c678c4e8913bd405a4f6d0fbbe0685f5a8fbcc1cf19768bbe232b2786df33d0",
+    "turnover_aware_quant.py": "6e128160db1ecafb18ef3ab1972e5e5acd9d2531b86bef814b9e41382b69c43d",
+    "staggered_turnover_quant.py": "f6bade6a083717a87397d940bdbe3cb8c1e783afb3ab5e536d8bef8aba454981",
+    "test_staggered_turnover_quant.py": "4e146abb819ad3105a94c47351f17d511e54f3baec11c5212390c7c540967dce"
+  }
+}
