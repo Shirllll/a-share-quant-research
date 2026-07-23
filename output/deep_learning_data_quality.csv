@@ -1,0 +1,16 @@
+rule,affected_rows,affected_share
+model_panel_rows,505779,1.0
+eligible_rows,380657,0.7526152726783832
+momentum_missing,62107,0.12279473841341772
+value_pe_missing,116026,0.2294005880038515
+value_pb_missing,5264,0.010407707714238828
+value_ps_missing,16802,0.033220042745942396
+low_volatility_missing,1680,0.0033216088449698387
+small_size_missing,0,0.0
+reversal_missing,328,0.0006485045840179209
+liquidity_missing,0,0.0
+roe_missing,39910,0.07890798154925373
+roa_missing,34661,0.06852993105684499
+gross_margin_missing,43492,0.0859901261222787
+cash_quality_missing,216532,0.42811583715417206
+low_leverage_missing,13602,0.026893168755523656
