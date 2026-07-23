@@ -17,7 +17,6 @@ def annual_returns(frame: pd.DataFrame) -> pd.DataFrame:
             "year": year,
             "long_only": (1 + group["net_return"]).prod() - 1,
             "industry_neutral_long_short": (1 + group["long_short_net_return"]).prod() - 1,
-            "previous_dl": (1 + group["previous_dl_return"]).prod() - 1,
             "benchmark": (1 + group["benchmark_return"]).prod() - 1,
         })
     return pd.DataFrame(rows)

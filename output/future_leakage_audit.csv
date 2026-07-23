@@ -1,6 +1,0 @@
-check,passed,evidence
-clean_before_all_models,True,prepare_advanced calls clean_monthly_panel before feature construction
-training_precedes_signal,True,maximum validation month is earlier than every refit month
-features_not_after_signal,True,maximum_feature_month <= signal_month
-scoring_ignores_future_return_availability,True,5 scored stock-months have missing next-month returns; the scoring universe is therefore not conditioned on future return availability
-retrospective_not_used_to_choose_production_model,True,Ridge is declared by policy; ML models remain experimental regardless of 2024-2025 results
