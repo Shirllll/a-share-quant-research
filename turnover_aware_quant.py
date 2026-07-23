@@ -26,8 +26,9 @@ FIXED_COST_GRID_BPS = (0, 20, 50, 100, 150, 200)
 CAPITAL_GRID = (10_000_000, 50_000_000, 100_000_000)
 SOURCE_FILES = (
     "data_cleaning.py", "quant_project.py", "advanced_quant.py",
+    "model_comparison_quant.py",
     "turnover_aware_quant.py", "turnover_aware_robustness.py",
-    "test_turnover_aware_quant.py",
+    "test_model_comparison_quant.py", "test_turnover_aware_quant.py",
 )
 
 
@@ -42,6 +43,7 @@ class Config:
     train_months: int = 84
     validation_months: int = 12
     refit_months: int = 3
+    rebalance_frequency_months: int = 3
     max_ridge_samples: int = 150_000
     top_fraction: float = 0.10
     smoothing_weight: float = 0.75
@@ -137,7 +139,10 @@ def generate_ridge_scores(panel: pd.DataFrame, config: Config) -> tuple[pd.DataF
     fitted = None
     refit_counter = 0
     start = pd.Timestamp(config.development_start)
-    end = pd.Timestamp(config.retrospective_end)
+    # The dataset ends in 2025-12, so 2025-11 is the final signal month with a
+    # predetermined realization window.  This boundary is global, never based
+    # on whether an individual stock happens to have a next-month return.
+    end = pd.Timestamp(config.retrospective_end) - pd.offsets.MonthEnd(1)
     months = sorted(pd.Timestamp(m) for m in panel.loc[panel["month"].between(start, end), "month"].unique())
     for month in months:
         if fitted is None or refit_counter >= config.refit_months:
@@ -176,7 +181,7 @@ def generate_ridge_scores(panel: pd.DataFrame, config: Config) -> tuple[pd.DataF
             })
             refit_counter = 0
 
-        test = panel[(panel["month"] == month) & panel["eligible"] & panel["forward_return"].notna()].copy()
+        test = scoring_universe(panel, month)
         if fitted is None or test.empty:
             continue
         model, medians, intercept, beta, alpha = fitted
@@ -195,6 +200,11 @@ def generate_ridge_scores(panel: pd.DataFrame, config: Config) -> tuple[pd.DataF
         ]].rename(columns={"Stkcd": "stock_code"}))
         refit_counter += 1
     return pd.concat(rows, ignore_index=True), pd.DataFrame(logs)
+
+
+def scoring_universe(panel: pd.DataFrame, month: pd.Timestamp) -> pd.DataFrame:
+    """Current-month eligibility only; never filter on next-month availability."""
+    return panel[(panel["month"] == month) & panel["eligible"]].copy()
 
 
 def _better_sort(frame: pd.DataFrame, side: str) -> pd.DataFrame:
@@ -339,10 +349,13 @@ def _weights_from_names(names: set[str]) -> dict[str, float]:
     return {name: weight for name in names}
 
 
-def _portfolio_return(weights: dict[str, float], frame: pd.DataFrame) -> float:
+def _portfolio_return(weights: dict[str, float], frame: pd.DataFrame) -> tuple[float, float]:
     if not weights:
-        return np.nan
-    return float(sum(weight * frame.loc[name, "forward_return"] for name, weight in weights.items()))
+        return np.nan, np.nan
+    returns = pd.Series({name: frame.loc[name, "forward_return"] for name in weights}, dtype=float)
+    missing_weight = float(sum(weights[name] for name in returns.index[returns.isna()]))
+    realized = float(sum(weights[name] * np.nan_to_num(value, nan=0.0) for name, value in returns.items()))
+    return realized, missing_weight
 
 
 def _proxy_drag(records: list[dict[str, object]], prefix: str) -> float:
@@ -363,15 +376,17 @@ def simulate_portfolios(score_panel: pd.DataFrame, config: Config,
     previous_diag_short: dict[str, float] = {}
     last_info: dict[str, dict[str, float]] = {}
 
-    for signal_month, raw_frame in score_panel.groupby("signal_month", sort=True):
+    for month_number, (signal_month, raw_frame) in enumerate(score_panel.groupby("signal_month", sort=True)):
         frame = raw_frame.copy().set_index("stock_code", drop=True)
         frame["smoothed_score"] = smooth_scores(frame["raw_score"], previous_smoothed, config.smoothing_weight)
         previous_smoothed = frame["smoothed_score"].to_dict()
         target_count = max(1, int(np.ceil(len(frame) * config.top_fraction)))
         weight_hint = 1.0 / target_count
+        scheduled_rebalance = month_number % config.rebalance_frequency_months == 0
+        execution_config = config if scheduled_rebalance else replace(config, exit_fraction=1.0)
         long_names, long_gains, attempts = select_buffered_names(
             frame, previous_long, "long", target_count, weight_hint,
-            config.portfolio_capital_rmb, config, "long_only", True,
+            config.portfolio_capital_rmb, execution_config, "long_only", True,
         )
         long_weights = _weights_from_names(long_names)
 
@@ -385,11 +400,11 @@ def simulate_portfolios(score_panel: pd.DataFrame, config: Config,
             prev_s = {name: weight for name, weight in previous_diag_short.items() if name in group.index}
             long_set, long_gain, long_attempts = select_buffered_names(
                 group, prev_l, "long", count, hint, config.portfolio_capital_rmb,
-                config, "diagnostic_long", False,
+                execution_config, "diagnostic_long", False,
             )
             short_set, short_gain, short_attempts = select_buffered_names(
                 group, prev_s, "short", count, hint, config.portfolio_capital_rmb,
-                config, "diagnostic_short", False,
+                execution_config, "diagnostic_short", False,
             )
             if long_set and short_set:
                 diag_pairs.append((long_set, short_set, long_gain, short_gain, long_attempts + short_attempts))
@@ -432,8 +447,10 @@ def simulate_portfolios(score_panel: pd.DataFrame, config: Config,
         diag_long_turnover = true_weight_turnover(diag_long_weights, previous_diag_long)
         diag_short_turnover = true_weight_turnover(diag_short_weights, previous_diag_short)
         long_short_turnover = diag_long_turnover + diag_short_turnover
-        long_gross = _portfolio_return(long_weights, frame)
-        long_short_gross = _portfolio_return(diag_long_weights, frame) - _portfolio_return(diag_short_weights, frame)
+        long_gross, long_missing_weight = _portfolio_return(long_weights, frame)
+        diag_long_return, diag_long_missing_weight = _portfolio_return(diag_long_weights, frame)
+        diag_short_return, diag_short_missing_weight = _portfolio_return(diag_short_weights, frame)
+        long_short_gross = diag_long_return - diag_short_return
         raw_ic = frame["raw_score"].corr(frame["target"], method="spearman")
         smoothed_ic = frame["smoothed_score"].corr(frame["target"], method="spearman")
 
@@ -453,12 +470,16 @@ def simulate_portfolios(score_panel: pd.DataFrame, config: Config,
             "signal_month": signal_month, "month": raw_frame["realization_month"].iloc[0],
             "period": raw_frame["period"].iloc[0], "maximum_feature_month": raw_frame["maximum_feature_month"].max(),
             "gross_return": long_gross, "turnover": long_turnover,
+            "scheduled_rebalance": scheduled_rebalance,
+            "missing_forward_return_weight": long_missing_weight,
             "net_return_20bps": long_gross - long_turnover * 20 / 10_000,
             "proxy_net_return": long_gross - long_proxy_drag,
             "holdings": len(long_weights), "raw_rank_ic": raw_ic, "rank_ic": smoothed_ic,
             "long_short_gross_return": long_short_gross,
             "diagnostic_long_turnover": diag_long_turnover,
             "diagnostic_short_turnover": diag_short_turnover,
+            "diagnostic_long_missing_forward_return_weight": diag_long_missing_weight,
+            "diagnostic_short_missing_forward_return_weight": diag_short_missing_weight,
             "long_short_turnover": long_short_turnover,
             "long_short_net_return_20bps": long_short_gross - long_short_turnover * 20 / 10_000,
             "long_short_proxy_net_return": long_short_gross - diagnostic_proxy_drag,

@@ -17,6 +17,7 @@ from turnover_aware_quant import (
     deterministic_sample,
     estimate_order_cost,
     parameter_selection,
+    scoring_universe,
     select_buffered_names,
     smooth_scores,
     true_weight_turnover,
@@ -158,6 +159,14 @@ class TurnoverAwareTests(unittest.TestCase):
         })
         with self.assertRaises(ValueError):
             validate_no_future_features(invalid)
+
+    def test_scoring_universe_does_not_filter_on_future_return(self):
+        panel = pd.DataFrame({
+            "month": pd.to_datetime(["2024-01-31", "2024-01-31"]),
+            "eligible": [True, True], "forward_return": [0.01, np.nan],
+        })
+        scored = scoring_universe(panel, pd.Timestamp("2024-01-31"))
+        self.assertEqual(len(scored), 2)
 
     def test_deterministic_sample_is_reproducible(self):
         frame = pd.DataFrame({"month": pd.date_range("2020-01-31", periods=100, freq="ME"), "x": range(100)})
