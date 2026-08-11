@@ -1,0 +1,10 @@
+rule,affected_rows,affected_share
+input_rows,505779,1.0
+flag_return_outlier,328,0.0006485045840179209
+flag_market_data_invalid,1746,0.003452100621022225
+flag_valuation_invalid,116868,0.23106534672258042
+flag_financial_stale,1,1.9771481220058563e-06
+flag_financial_invalid,221731,0.43839503024048054
+flag_special_treatment,15047,0.02975014779182212
+flag_abnormal_listing,268,0.0005298756966975695
+final_eligible_rows,378533,0.7484158100672428

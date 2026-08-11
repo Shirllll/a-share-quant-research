@@ -1,0 +1,53 @@
+{
+  "status": "frozen_after_development_and_selection",
+  "generated_at_utc": "2026-08-11T07:31:16.095993+00:00",
+  "true_forward_start": "2026-09-01",
+  "retrospective_test_not_used_for_selection": true,
+  "selected_parameters": {
+    "signal_model": "mlp",
+    "smoothing_weight": 0.75,
+    "exit_fraction": 0.2
+  },
+  "config": {
+    "start": "2018-01-01",
+    "train_months": 60,
+    "validation_months": 12,
+    "top_fraction": 0.1,
+    "smoothing_candidates": [
+      1.0,
+      0.75,
+      0.5
+    ],
+    "exit_candidates": [
+      0.15,
+      0.2,
+      0.25
+    ],
+    "mlp_weight_candidates": [
+      0.0,
+      0.25,
+      0.5,
+      0.75
+    ],
+    "signal_model_candidates": [
+      "ridge",
+      "mlp",
+      "dynamic_blend"
+    ],
+    "selection_cost_bps": 50,
+    "report_cost_bps": 20,
+    "development_end": "2021-12-31",
+    "selection_start": "2022-01-01",
+    "selection_end": "2023-12-31",
+    "retrospective_start": "2024-01-01",
+    "retrospective_end": "2025-12-31",
+    "volatility_target": 0.15,
+    "minimum_exposure": 0.5,
+    "random_seed": 20260811
+  },
+  "code_sha256": {
+    "optimized_quant.py": "a12ec64a1cb8a8d5657eb3f4bb198efcd253d90f9249e0f3f8fc325d199fdacd",
+    "data_cleaning.py": "2c72482e439b4a7c7067ef9b7e92ee7a705fac0dbc590c6525fa99ae9604987c",
+    "deep_learning_quant.py": "438ac84685f9bcdc41adab8394cbc1a293849175a3ebf769b90a988497dcdb0a"
+  }
+}
