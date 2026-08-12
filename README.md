@@ -44,24 +44,6 @@
 
 `risk_overlay_quant.py`使用滞后12个月滚动beta和50%对冲比例做独立诊断，并将期货名义敞口变化、交易成本和年化展期成本计入收益。现金指数收益只作为期货收益代理，没有模拟基差、保证金和合约换月，因此不能称为真实期货回测。全期20bp股票成本口径下，对冲代理Sharpe为0.619，低于未对冲的0.627；它降低了部分阶段波动，却牺牲了收益，因此不进入正式组合。
 
-### 独立数据实验：卖方研报与盈利预测
-
-本轮新增了独立于CSMAR面板的东方财富历史个股研报快照。`external_data_quant.py`按年度、逐页缓存2017—2025数据，共取得139,937份研报、覆盖4,688只股票。每个股票月只读取不晚于当月末发布的研报，并在每次季度重估中同时检查标签实现月份和研报发布日期。原始研报缓存位于`data/`，不提交GitHub。
-
-构造的点时特征包括近90日研报数量、近180日机构数、分析师评级、EPS预期增长和三个月预期修正。2018—2023合格股票的月均近90日研报覆盖率为26.54%，点时审计全部通过。但分阶段IC显示明显不稳定：
-
-| 外部特征 | development Rank IC | selection Rank IC | 结论 |
-|---|---:|---:|---|
-| 研报数量 | 0.0506 | -0.0213 | 方向反转 |
-| 机构覆盖数 | 0.0509 | -0.0313 | 方向反转 |
-| 分析师评级 | 0.0082 | 0.0028 | 同号但很弱 |
-| EPS预期增长 | -0.0020 | -0.0242 | 覆盖月份不足 |
-| EPS预期修正 | -0.0035 | -0.0181 | 覆盖月份不足 |
-
-把五个外部特征直接加入Ridge/MLP后，20bp全期年化收益为10.19%、Sharpe 0.556、最大回撤-23.38%、月均换手27.49%，低于冻结版的Sharpe 0.627。进一步只对跨阶段同号的分析师评级测试2.5%/5%/10%轻量叠加，最小的2.5%权重仍使selection 50bp Sharpe从0.236降至0.222。因此本轮独立数据接入在工程和点时审计上成功，但没有形成可接受的增量Alpha，正式生产配置继续保持不变。
-
-北向资金个股持仓也被评估为候选数据源，但当前公开接口只能稳定提供近期数据，无法覆盖2018—2023的开发/选择区间，因此未把它拼入历史回测。
-
 ### 时间区间与结果解释
 
 - development：2018-02至2021-12，用于开发；
@@ -204,14 +186,12 @@ python -m venv .venv
 .\.venv\Scripts\python.exe optimized_quant.py
 .\.venv\Scripts\python.exe sharpe_robustness.py
 .\.venv\Scripts\python.exe risk_overlay_quant.py
-.\.venv\Scripts\python.exe external_data_quant.py --refresh
 
 .\.venv\Scripts\python.exe -m unittest -q test_data_cleaning.py
 .\.venv\Scripts\python.exe -m unittest -q test_deep_learning_quant.py
 .\.venv\Scripts\python.exe -m unittest -q test_optimized_quant.py
 .\.venv\Scripts\python.exe -m unittest -q test_sharpe_robustness.py
 .\.venv\Scripts\python.exe -m unittest -q test_risk_overlay_quant.py
-.\.venv\Scripts\python.exe -m unittest -q test_external_data_quant.py
 ```
 
 原始CSMAR数据受许可限制，不上传GitHub。运行前需将对应压缩文件放入`data/`目录。
@@ -240,11 +220,6 @@ python -m venv .venv
 - `output/sharpe_candidate_cost_stress.csv`：本轮固定候选在20/50/100bp下的全期压力结果；
 - `output/sharpe_candidate_retrospective.csv`：与选择表物理分离的2024—2025回顾结果；
 - `output/risk_overlay_backtest.csv`、`output/risk_overlay_metrics.csv`、`output/risk_overlay_cost_stress.csv`：CSI 500期货对冲代理诊断。
-- `output/external_data_quality.csv`：独立研报数据的日期、报告数、股票数、覆盖率与点时审计；
-- `output/external_feature_ic.csv`：五个外部特征在development、selection与retrospective_test的分阶段Rank IC；
-- `output/external_backtest.csv`、`output/external_subperiod.csv`、`output/external_cost_stress.csv`：外部特征增强模型结果；
-- `output/external_parameter_selection.csv`、`output/external_leakage_audit.csv`、`output/external_research_lock.json`：参数选择、未来数据审计与冻结记录；
-- `output/external_rating_overlay_selection.csv`：分析师评级2.5%/5%/10%轻量叠加对照。
 
 ## 9. 限制
 
