@@ -23,6 +23,27 @@
 
 波动率控制版本也被实际测试，但其20bp Sharpe只有0.488，低于完全投资版本，因此不进入正式候选。没有因为风险控制“听起来合理”就把它写成成功结果。
 
+### 2026-08-12 Sharpe稳健性复核
+
+本轮没有修改冻结生产配置。研究只使用已有清洗因子、Ridge/MLP走步预测和小型组合网格，比较标准以50bp成本下的development与selection共同表现为主；2024—2025结果单独写入回顾文件，不参与候选准入。
+
+| 候选 | development Sharpe（50bp） | selection Sharpe（50bp） | 全期Sharpe（20bp） | 全期Sharpe（50bp） | 月均换手 | 结论 |
+|---|---:|---:|---:|---:|---:|---|
+| **冻结版：前10%、平滑0.75、退出20%** | **0.550** | 0.236 | 0.627 | **0.572** | **25.78%** | 继续保留 |
+| 前5%集中组合 | 0.474 | **0.357** | **0.634** | 0.549 | 40.50% | 拒绝：换手和成本后表现恶化 |
+| 分数排名轻度倾斜 | 0.541 | 0.248 | 0.629 | 0.569 | 28.31% | 拒绝：增益不足且换手上升 |
+| 剔除波动最高10% | 0.548 | 0.293 | 0.632 | 0.572 | 27.68% | 拒绝：50bp增益仅0.0005且换手上升 |
+| Ridge/MLP共识排序 | 0.509 | 0.226 | 0.596 | 0.533 | 29.58% | 拒绝：跨阶段退化 |
+| 10%价值轻度校准 | 0.476 | 0.249 | 0.611 | 0.558 | 24.60% | 拒绝：development明显退化 |
+
+还检查了36/60/84个月训练窗口、质量与低波校准、信号分散度降仓以及固定比例的核心/防御组合。60个月窗口仍是开发期与选择期较稳健的选择；其余方案未同时改善两个阶段。完整固定候选表见`output/sharpe_candidate_selection.csv`，成本压力见`output/sharpe_candidate_cost_stress.csv`，回顾结果见`output/sharpe_candidate_retrospective.csv`。
+
+结论不是“夏普已被显著提高”，而是：在不引入新数据、不使用2024—2025挑参数、并把真实权重变化计入成本的约束下，没有找到可替代Sharpe 0.627冻结版的稳健候选。前5%方案的0.634只是全样本20bp口径上的小幅提高，不能抵消换手从25.78%升至40.50%和50bp Sharpe下降。继续扩大参数搜索只会加重过拟合，因此本轮把失败候选作为可复现稳健性结果，而不改写生产结论。
+
+### CSI 500股指期货对冲代理
+
+`risk_overlay_quant.py`使用滞后12个月滚动beta和50%对冲比例做独立诊断，并将期货名义敞口变化、交易成本和年化展期成本计入收益。现金指数收益只作为期货收益代理，没有模拟基差、保证金和合约换月，因此不能称为真实期货回测。全期20bp股票成本口径下，对冲代理Sharpe为0.619，低于未对冲的0.627；它降低了部分阶段波动，却牺牲了收益，因此不进入正式组合。
+
 ### 时间区间与结果解释
 
 - development：2018-02至2021-12，用于开发；
@@ -163,10 +184,14 @@ python -m venv .venv
 .\.venv\Scripts\python.exe ml_quant.py --start 2018-01-01
 .\.venv\Scripts\python.exe deep_learning_quant.py --start 2018-01-01
 .\.venv\Scripts\python.exe optimized_quant.py
+.\.venv\Scripts\python.exe sharpe_robustness.py
+.\.venv\Scripts\python.exe risk_overlay_quant.py
 
 .\.venv\Scripts\python.exe -m unittest -q test_data_cleaning.py
 .\.venv\Scripts\python.exe -m unittest -q test_deep_learning_quant.py
 .\.venv\Scripts\python.exe -m unittest -q test_optimized_quant.py
+.\.venv\Scripts\python.exe -m unittest -q test_sharpe_robustness.py
+.\.venv\Scripts\python.exe -m unittest -q test_risk_overlay_quant.py
 ```
 
 原始CSMAR数据受许可限制，不上传GitHub。运行前需将对应压缩文件放入`data/`目录。
@@ -191,6 +216,10 @@ python -m venv .venv
 - `output/optimized_alpha_diagnostics.csv`、`output/optimized_decile_returns.csv`：月度Rank IC与十分组单调性；
 - `output/optimized_model_log.csv`、`output/optimized_leakage_audit.csv`：季度重估和标签实现日期审计；
 - `output/optimized_research_lock.json`：冻结参数、时间边界和代码SHA-256。
+- `output/sharpe_candidate_selection.csv`：仅用development和selection生成的候选准入表；
+- `output/sharpe_candidate_cost_stress.csv`：本轮固定候选在20/50/100bp下的全期压力结果；
+- `output/sharpe_candidate_retrospective.csv`：与选择表物理分离的2024—2025回顾结果；
+- `output/risk_overlay_backtest.csv`、`output/risk_overlay_metrics.csv`、`output/risk_overlay_cost_stress.csv`：CSI 500期货对冲代理诊断。
 
 ## 9. 限制
 
