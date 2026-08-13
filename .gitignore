@@ -1,7 +1,6 @@
 data/
 output/monthly_panel.csv.gz
 output/optimized_signal_panel.csv.gz
-output/daily_risk_features.csv.gz
 output/nav.png
 output/mpl-cache/
 output/*.log
