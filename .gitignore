@@ -1,5 +1,6 @@
 data/
 output/monthly_panel.csv.gz
+output/optimized_signal_panel.csv.gz
 output/nav.png
 output/mpl-cache/
 output/*.log
