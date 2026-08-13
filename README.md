@@ -40,6 +40,23 @@
 
 结论不是“夏普已被显著提高”，而是：在不引入新数据、不使用2024—2025挑参数、并把真实权重变化计入成本的约束下，没有找到可替代Sharpe 0.627冻结版的稳健候选。前5%方案的0.634只是全样本20bp口径上的小幅提高，不能抵消换手从25.78%升至40.50%和50bp Sharpe下降。继续扩大参数搜索只会加重过拟合，因此本轮把失败候选作为可复现稳健性结果，而不改写生产结论。
 
+### 2026-08-13 日频风险信息实验
+
+本轮读取本地2017-12至2025-12日行情，在每个信号月末构造已实现波动、下行波动、最大单日波动、日内高低价差、Amihud式非流动性代理、成交额稳定性和涨跌停占比。输入是**日频数据，不是分钟行情、逐笔成交或订单簿**。每条风险特征的最大来源日期不晚于对应信号月末；风险信息不进入MLP或Ridge收益预测，只对新建仓候选施加固定惩罚，已有持仓继续遵循原Alpha退出缓冲。
+
+参数只使用development和selection阶段判断，固定比较尾部风险、流动性风险和综合风险三类定义，以及0.05、0.10、0.15三档惩罚。2024—2025回顾结果在选择完成后才单独输出。
+
+| 50bp口径 | development Sharpe | selection Sharpe | 两阶段平均 | 选择前月均换手 | 结论 |
+|---|---:|---:|---:|---:|---|
+| **冻结版** | **0.550** | **0.236** | **0.393** | 23.54% | 继续保留 |
+| 尾部风险惩罚0.05 | 0.562 | 0.176 | 0.369 | 23.52% | 拒绝：选择期明显退化 |
+| 流动性风险惩罚0.05 | 0.540 | 0.202 | 0.371 | **23.25%** | 拒绝：平均Sharpe下降 |
+| 综合风险惩罚0.05 | 0.557 | 0.187 | 0.372 | 23.38% | 拒绝：选择期明显退化 |
+
+风险惩罚能把全期波动和最大回撤略微压低。例如尾部风险惩罚0.05在20bp下为年化11.48%、Sharpe 0.629、最大回撤-23.84%、换手25.57%，而冻结版为年化11.59%、Sharpe 0.627、最大回撤-24.64%、换手25.78%。但这个约0.002的全期Sharpe增量来自阶段抵消，且2024—2025回顾期表现较好；它没有通过事先规定的2018—2023准入规则。因此结论是：**日频风险信息具有风险描述价值，但没有形成稳健、可上线的增量，正式版本仍保持不变。**
+
+风险面板覆盖430,104个股票月、5,764只股票和97个月，未来日期违规行为0条。完整选择、成本压力、分阶段表现和时点审计见`output/daily_risk_*.csv`。本地大型风险面板`output/daily_risk_features.csv.gz`被Git忽略，不上传原始或大体量衍生数据。
+
 ### CSI 500股指期货对冲代理
 
 `risk_overlay_quant.py`使用滞后12个月滚动beta和50%对冲比例做独立诊断，并将期货名义敞口变化、交易成本和年化展期成本计入收益。现金指数收益只作为期货收益代理，没有模拟基差、保证金和合约换月，因此不能称为真实期货回测。全期20bp股票成本口径下，对冲代理Sharpe为0.619，低于未对冲的0.627；它降低了部分阶段波动，却牺牲了收益，因此不进入正式组合。
@@ -186,12 +203,14 @@ python -m venv .venv
 .\.venv\Scripts\python.exe optimized_quant.py
 .\.venv\Scripts\python.exe sharpe_robustness.py
 .\.venv\Scripts\python.exe risk_overlay_quant.py
+.\.venv\Scripts\python.exe daily_risk_quant.py
 
 .\.venv\Scripts\python.exe -m unittest -q test_data_cleaning.py
 .\.venv\Scripts\python.exe -m unittest -q test_deep_learning_quant.py
 .\.venv\Scripts\python.exe -m unittest -q test_optimized_quant.py
 .\.venv\Scripts\python.exe -m unittest -q test_sharpe_robustness.py
 .\.venv\Scripts\python.exe -m unittest -q test_risk_overlay_quant.py
+.\.venv\Scripts\python.exe -m unittest -q test_daily_risk_quant.py
 ```
 
 原始CSMAR数据受许可限制，不上传GitHub。运行前需将对应压缩文件放入`data/`目录。
@@ -220,6 +239,10 @@ python -m venv .venv
 - `output/sharpe_candidate_cost_stress.csv`：本轮固定候选在20/50/100bp下的全期压力结果；
 - `output/sharpe_candidate_retrospective.csv`：与选择表物理分离的2024—2025回顾结果；
 - `output/risk_overlay_backtest.csv`、`output/risk_overlay_metrics.csv`、`output/risk_overlay_cost_stress.csv`：CSI 500期货对冲代理诊断。
+- `output/daily_risk_parameter_selection.csv`：只使用development和selection阶段的日频风险候选准入结果；
+- `output/daily_risk_backtest.csv`、`output/daily_risk_cost_stress.csv`、`output/daily_risk_subperiod.csv`：冻结候选、成本压力与分阶段结果；
+- `output/daily_risk_retrospective.csv`：参数冻结后单独生成的2024—2025回顾结果；
+- `output/daily_risk_data_quality.csv`、`output/daily_risk_leakage_audit.csv`、`output/daily_risk_research_lock.json`：数据覆盖、时点审计和研究冻结记录。
 
 ## 9. 限制
 

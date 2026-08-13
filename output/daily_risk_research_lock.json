@@ -1,0 +1,34 @@
+{
+  "status": "experiment_does_not_replace_frozen_core",
+  "generated_at_utc": "2026-08-13T01:43:17.597786+00:00",
+  "retrospective_test_not_used_for_selection": true,
+  "true_forward_start": "2026-09-01",
+  "selected_candidate": "production_core",
+  "config": {
+    "start": "2017-12-01",
+    "end": "2025-12-31",
+    "minimum_daily_observations": 10,
+    "penalty_candidates": [
+      0.05,
+      0.1,
+      0.15
+    ],
+    "risk_model_candidates": [
+      "tail",
+      "liquidity",
+      "composite"
+    ],
+    "top_fraction": 0.1,
+    "exit_fraction": 0.2,
+    "smoothing_weight": 0.75,
+    "selection_cost_bps": 50,
+    "report_cost_bps": 20,
+    "maximum_turnover_increase": 0.05,
+    "minimum_average_sharpe_gain": 0.01,
+    "maximum_development_sharpe_loss": 0.02,
+    "minimum_selection_sharpe_gain": 0.0
+  },
+  "code_sha256": {
+    "daily_risk_quant.py": "e80f25981f471e9e11baaed973a0ae2119effce5789ca984dc66507fa7728395"
+  }
+}

@@ -1,0 +1,2 @@
+rows,stocks,months,first_month,last_month,minimum_source_date,maximum_source_date,future_leakage_rows,input_frequency,not_order_book_or_intraday
+430104,5764,97,2017-12-31,2025-12-31,2017-12-14,2025-12-31,0,daily,True
